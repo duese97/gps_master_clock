@@ -7,9 +7,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "bsp.h"
 #include "custom_main.h"
-
-#define GPIO_LED GPIO_NUM_2
 
 
 // for logging
