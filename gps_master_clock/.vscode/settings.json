@@ -23,6 +23,8 @@
     "cstring": "c",
     "cstdint": "c",
     "gpio.h": "c",
-    "stdint.h": "c"
+    "stdint.h": "c",
+    "tinygps.h": "c",
+    "cstddef": "cpp"
   }
 }
