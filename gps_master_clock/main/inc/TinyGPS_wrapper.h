@@ -1,11 +1,18 @@
+#ifndef _TINY_GPS_WRAPPER_H
+#define _TINY_GPS_WRAPPER_H
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
 #include <stdint.h>
+#include <time.h>
 
 bool TinyGPS_wrapper_encode(char c);
-  void crack_datetime(int *year, uint8_t *month, uint8_t *day, 
-    uint8_t *hour, uint8_t *minute, uint8_t *second, uint8_t *hundredths, unsigned long *fix_age);
+time_t TinyGPS_wrapper_crack_datetime(void);
+
 #ifdef __cplusplus
 }
 #endif
+
+#endif // _TINY_GPS_WRAPPER_H

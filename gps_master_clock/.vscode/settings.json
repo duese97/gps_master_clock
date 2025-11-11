@@ -25,6 +25,10 @@
     "gpio.h": "c",
     "stdint.h": "c",
     "tinygps.h": "c",
-    "cstddef": "cpp"
+    "cstddef": "cpp",
+    "cmath": "cpp",
+    "freertos.h": "c",
+    "tinygps_wrapper.h": "c",
+    "chrono": "cpp"
   }
 }
