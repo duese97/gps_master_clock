@@ -5,9 +5,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/uart.h"
+#include "driver/gptimer.h"
 #include "TinyGPS_wrapper.h"
 
 #include "bsp.h"
+
+#define SECOND_TIMER_PERIOD_US 1000000ULL
 
 /* Configure parameters of an UART driver, communication pins and install the driver */
 const uart_config_t uart_config = {
@@ -27,20 +30,62 @@ const int intr_alloc_flags =
 #endif // CONFIG_UART_ISR_IN_IRAM
 
 
+static volatile time_t mcu_utc;
+
+struct tm mcu_local_time;
+
+static void periodic_timer_callback(void* arg)
+{
+    mcu_utc++;
+}
+
+static const esp_timer_create_args_t periodic_timer_args =
+{
+    .callback = &periodic_timer_callback,
+    /* name is optional, but may help identify the timer when debugging */
+    .name = "secTimer"
+};
+
+static void print_time(struct tm* tm)
+{
+    PRINT_LOG("%02d:%02d:%02d %d.%d.%d DST: %d",
+        tm->tm_hour, tm->tm_min, tm->tm_sec,
+        tm->tm_mday, tm->tm_mon + 1, tm->tm_year + 1900,
+        tm->tm_isdst
+    );
+}
+
 void neo6M_Task(void *parameter)
 {
     char buf;
-    struct tm time_local;
+    struct tm last_gps_time = {0};
+    struct tm gps_local_time = {0}; 
+    time_t last_connected_utc = 0;
     uint32_t age;
+    bool synced_once = false;
 
+    // setup the UART for the neo6M module
     ESP_ERROR_CHECK(uart_driver_install(NEO6M_UART, 256 /*must be at least this big(?)*/, 0, 0, NULL, intr_alloc_flags));
     ESP_ERROR_CHECK(uart_param_config(NEO6M_UART, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(NEO6M_UART, NEO6M_TX_PIN, NEO6M_RX_PIN, GPIO_NUM_NC, GPIO_NUM_NC));
 
+    // setup periodic timer for local timekeeping
+    esp_timer_handle_t periodic_timer;
+    ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &periodic_timer));
+
     while(1)
     {
-        if (uart_read_bytes(NEO6M_UART, &buf, sizeof(buf), 1) != 1)
+        int res = uart_read_bytes(NEO6M_UART, &buf, sizeof(buf), 2000); // normally data should frequently come in
+        if (res <= 0) 
         { // timed out or any other error
+            if (synced_once)
+            {
+                time_t snapshot = mcu_utc; // Not sure if needed, better copy data
+
+                PRINT_LOG("No GPS signal, local time:");
+                mcu_local_time = *localtime(&snapshot);
+                print_time(&mcu_local_time);
+            }
             continue;
         }
 
@@ -49,20 +94,48 @@ void neo6M_Task(void *parameter)
             continue;
         }
         
-        TinyGPS_wrapper_crack_datetime(&time_local, &age);
+        // interpret received data
+        TinyGPS_wrapper_crack_datetime(&gps_local_time, &last_connected_utc, &age);
 
         if (TinyGPS_wrapper_age_invalid(age) == true)
         { // age should have proper value
             continue;
         }
+        
+        if (synced_once == false)
+        {
+            PRINT_LOG("Inital sync");
+            synced_once = true;
+            last_gps_time = gps_local_time;
 
-        // calculate required offsets for 'actual' date values
-        time_local.tm_year += 1900;
-        time_local.tm_mon += 1;
+            mcu_utc = last_connected_utc;
 
-        PRINT_LOG("%02d:%02d:%02d %d.%d.%d daylight saving: %d age: %lu",
-            time_local.tm_hour, time_local.tm_min, time_local.tm_sec,
-            time_local.tm_mday, time_local.tm_mon, time_local.tm_year, time_local.tm_isdst, age
-        );
+            // start cyclic timer
+            ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US));
+            continue;
+        }
+
+        // do not perform too many prints, once every seconds is sufficient
+        if (gps_local_time.tm_sec != last_gps_time.tm_sec)
+        {
+            print_time(&gps_local_time);
+        }
+
+        // determine time difference between local clock and received time
+        double clock_diff = difftime(mcu_utc, last_connected_utc);
+        if (clock_diff > 5)
+        { // too great, adjust
+            esp_timer_stop(periodic_timer); // halt timer
+            mcu_utc = last_connected_utc; // set new UTC timestamp
+            esp_timer_restart(periodic_timer, SECOND_TIMER_PERIOD_US); // restart timer
+        }
+
+        // once every minute: print the delta unconditionally
+        if ((gps_local_time.tm_min != last_gps_time.tm_min) || (gps_local_time.tm_hour != last_gps_time.tm_hour))
+        {
+            PRINT_LOG("MCU <-> GPS delta: %.0fs", clock_diff);
+        }
+
+        last_gps_time = gps_local_time; // remember last time
     }
 }
