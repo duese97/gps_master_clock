@@ -9,7 +9,8 @@ extern "C" {
 #include <time.h>
 
 bool TinyGPS_wrapper_encode(char c);
-time_t TinyGPS_wrapper_crack_datetime(void);
+void TinyGPS_wrapper_crack_datetime(struct tm* localtime, uint32_t* age);
+bool TinyGPS_wrapper_age_invalid(uint32_t age);
 
 #ifdef __cplusplus
 }

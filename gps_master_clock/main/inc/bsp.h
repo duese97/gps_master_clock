@@ -13,8 +13,11 @@
 #define I2C_PORT_NUM			I2C_NUM_0        /*!< I2C port number for master dev */
 #define MAX_WAIT_TICKS          10 // should usually only take 1 ms or less
 
-#define LCM1602_ADDR            0x3E  
+#define LCM1602_ADDR            0x3E
 
-void bsp_init(void);
+#define NEO6M_UART              UART_NUM_2
+#define NEO6M_RX_PIN            GPIO_NUM_16
+#define NEO6M_TX_PIN            GPIO_NUM_17
+
 
 #endif // _BSP_H_

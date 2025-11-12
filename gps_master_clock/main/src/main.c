@@ -10,40 +10,62 @@
 #include "bsp.h"
 #include "custom_main.h"
 
-#include <sys/time.h>
-#include "TinyGPS_wrapper.h"
+#include "neo6m.h"
 
 
+#define SETUP_TASK_VARS(taskname, stacksize, queueElemByteCnt) \
+    static StackType_t taskStack##taskname[stacksize];         \
+    static TaskHandle_t taskHandle##taskname;                  \
+    static StaticTask_t taskBuffer##taskname;                  \
+    static QueueHandle_t queueHandle##taskname;                \
+    static uint8_t queueStorageArea##taskname[queueElemByteCnt]
+
+#define SETUP_TASK_VARS_NO_QUEUE(taskname, stacksize)  \
+    static StackType_t taskStack##taskname[stacksize]; \
+    static TaskHandle_t taskHandle##taskname;          \
+    static StaticTask_t taskBuffer##taskname;
+
+#define SETUP_QUEUE(taskname, queueElemCnt)                  \
+    static StaticQueue_t queue##taskname;                    \
+    queueHandle##taskname = xQueueCreateStatic(              \
+        sizeof(queueStorageArea##taskname) / QUEUE_ELEM_LEN, \
+        QUEUE_ELEM_LEN,                                      \
+        queueStorageArea##taskname,                          \
+        &queue##taskname)
+
+        /* Messaging */
+#define QUEUE_LEN_GENERAL 3
+#define QUEUE_ELEM_LEN sizeof(task_msg_t)
+#define QUEUE_STORAGE_GENERAL (QUEUE_LEN_GENERAL * QUEUE_ELEM_LEN)
+#define QUEUE_MAX_BLOCK_MS 100
+
+// static stack sizes (printf related stuff needs a lot of RAM)
+#define STACKSIZE_NEO6M 4096
+#define STACKSIZE_LCD   2048
+
+/* TASK */
+enum
+{
+    // priorities (higher number = higher prio)
+    TASK_PRIO_LCD = 1,
+    TASK_PRIO_NEO6M,
+};
+
+// task stacks, task handles (for inter task communication) and messaging
+SETUP_TASK_VARS(NEO6M, STACKSIZE_NEO6M, QUEUE_STORAGE_GENERAL);
+SETUP_TASK_VARS(LCD, STACKSIZE_LCD, QUEUE_STORAGE_GENERAL);
+
+// for fast and uncomplicated assignment of task ID<->queue
+static const QueueHandle_t *handleLookup[] =
+{
+        [TASK_LCD] = &queueHandleNEO6M,
+        [TASK_NEO6M] = &queueHandleLCD,
+};
 
 // for logging
 SemaphoreHandle_t xUartSemaphore;
 char print_buf[MAX_LOG_LEN];
 
-static void init_NEO_6M_uart(void)
-{
-    uart_port_t portNum = UART_NUM_2;
-    int tx_pin = GPIO_NUM_17, rx_pin = GPIO_NUM_16;
-
-    /* Configure parameters of an UART driver,
-     * communication pins and install the driver */
-    uart_config_t uart_config = {
-        .baud_rate = 9600,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
-    };
-    int intr_alloc_flags = 0;
-
-#if CONFIG_UART_ISR_IN_IRAM
-    intr_alloc_flags = ESP_INTR_FLAG_IRAM;
-#endif
-
-    ESP_ERROR_CHECK(uart_driver_install(portNum, MAX_LOG_LEN /*not needed?*/, 0, 0, NULL, intr_alloc_flags));
-    ESP_ERROR_CHECK(uart_param_config(portNum, &uart_config));
-    ESP_ERROR_CHECK(uart_set_pin(portNum, tx_pin, rx_pin, GPIO_NUM_NC, GPIO_NUM_NC));
-}
 
 static void init_serial_print(void)
 {
@@ -89,40 +111,70 @@ void serial_print_custom(void)
     uart_write_bytes(UART_NUM_0, print_buf, print_len);
 }
 
+bool receiveTaskMessage(task_type_t dst, uint32_t timeout, task_msg_t *msg)
+{
+    bool success = false;
+    QueueHandle_t handle = NULL;
+
+    if (dst < sizeof(handleLookup) / sizeof(handleLookup[0]))
+    {
+        handle = *(handleLookup[dst]); // determine queue handle
+    }
+    if (!handle)
+    {
+        PRINT_LOG("Invalid destination task %d", dst);
+    }
+    else if (xQueueReceive(handle, (void *)msg, timeout) == pdTRUE)
+    {
+        success = true;
+    }
+    return success;
+}
+
+bool sendTaskMessage(task_msg_t *msg)
+{
+    bool success = false;
+    QueueHandle_t handle = NULL;
+
+    if (msg->dst < sizeof(handleLookup) / sizeof(handleLookup[0]))
+    {
+        handle = *(handleLookup[msg->dst]); // determine queue handle
+    }
+
+    if (!handle)
+    {
+        PRINT_LOG("Invalid destination task %d", msg->dst);
+    }
+    else if (xQueueSend(handle, (void *)msg, QUEUE_MAX_BLOCK_MS) != pdTRUE)
+    {
+        PRINT_LOG("Queue send failed, dst: %u, cmd: %u", msg->dst, msg->cmd);
+    }
+    else
+    {
+        success = true;
+    }
+    return success;
+}
 
 void app_main(void)
 {
     gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
 
     init_serial_print();
-    init_NEO_6M_uart();
 
-    // Set timezone for Europe/Berlin (https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv)
-    setenv("TZ","CET-1CEST,M3.5.0,M10.5.0/3",1);
-    tzset();
+    taskHandleNEO6M = xTaskCreateStatic(
+        neo6M_Task,
+        "neo6M",
+        STACKSIZE_NEO6M,
+        NULL,
+        TASK_PRIO_NEO6M,
+        taskStackNEO6M,
+        &taskBufferNEO6M
+    );
 
-    char buf;
-    struct tm tm;
-
-    gpio_set_level(GPIO_LED, !gpio_get_level(GPIO_LED));
     while(1)
     {
-        if (uart_read_bytes(UART_NUM_2, &buf, sizeof(buf), 1) != 1)
-        { // timed out or any other error
-            continue;
-        }
-
-        if (TinyGPS_wrapper_encode(buf) == false)
-        { // not yet done parsing
-            continue;
-        }
-        
-        time_t now_utc = TinyGPS_wrapper_crack_datetime();
-        localtime_r(&now_utc, &tm);
-
-        PRINT_LOG("%02d:%02d:%02d %d.%d.%d daylight saving: %d",
-            tm.tm_hour, tm.tm_min, tm.tm_sec,
-            tm.tm_mday, tm.tm_mon + 1, tm.tm_year + 1900, tm.tm_isdst
-        );
+        vTaskDelay(100);
+        gpio_set_level(GPIO_LED, !gpio_get_level(GPIO_LED));
     }
 }

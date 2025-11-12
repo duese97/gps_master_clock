@@ -7,6 +7,37 @@
 #include "freertos/FreeRTOS.h" // for semaphore
 #include "esp_timer.h" // for micorsecond timer
 
+
+//---------------------------------------------------------------------------
+// Enums
+//---------------------------------------------------------------------------
+typedef enum
+{
+  TASK_LCD,
+  TASK_NEO6M,
+} task_type_t;
+
+
+/* task messaging */
+typedef enum
+{
+  TASK_CMD_START = 0,
+  NUM_TASK_CMD
+} task_cmd_t;
+
+//---------------------------------------------------------------------------
+// Types
+//---------------------------------------------------------------------------
+typedef struct
+{
+  task_type_t dst; // destination of message
+  task_cmd_t cmd;
+  union // payload, can be unused
+  {
+
+  };
+} task_msg_t;
+
 //---------------------------------------------------------------------------
 // Exported var/func
 //---------------------------------------------------------------------------

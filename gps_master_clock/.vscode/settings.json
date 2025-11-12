@@ -29,6 +29,11 @@
     "cmath": "cpp",
     "freertos.h": "c",
     "tinygps_wrapper.h": "c",
-    "chrono": "cpp"
+    "chrono": "cpp",
+    "time.h": "c",
+    "stdio.h": "c",
+    "neo6m.h": "c",
+    "task.h": "c",
+    "bsp.h": "c"
   }
 }
