@@ -1,20 +1,18 @@
 #include "timekeep.h"
 
 #include "custom_main.h"
-
+#include "bsp.h"
 
 
 static SemaphoreHandle_t tz_mutex;
 
 static struct tm mcu_local_time;
 
-static int clock_hour_hand, clock_minute_hand;
-
+static int clock_minutes_midnight = 0; // local minutes after midnight
+static int clock_minutes_diff = 0; // difference to correct time
 
 void take_tz_mutex(void)
 {
-    bool res = false;
-
     if (tz_mutex == NULL) // already created?
     {
       tz_mutex = xSemaphoreCreateMutex(); // for access to LOGs
@@ -44,6 +42,8 @@ void print_tm_time(char* additional_str, struct tm* tm)
 void timekeep_Task(void *parameter)
 {
     task_msg_t msg;
+    gpio_set_direction(GPIO_LED, GPIO_MODE_INPUT_OUTPUT);
+
     while(1)
     {
         if (receiveTaskMessage(TASK_TIMEKEEP, 100, &msg) == false)
@@ -51,32 +51,30 @@ void timekeep_Task(void *parameter)
             continue;
         }
 
-        take_tz_mutex();
-        mcu_local_time = *localtime(&msg.utc_time);
-        give_tz_mutex();
-
-        if (mcu_local_time.tm_sec != 0) // only sync at full minutes
+        if(msg.cmd == SECOND_TRIGGER)
         {
-            continue;
-        }
-        
-        int hour_diff = mcu_local_time.tm_hour - clock_hour_hand;
-        int min_diff = mcu_local_time.tm_min - clock_minute_hand;
-
-        min_diff += hour_diff * 60;
-
-        if (min_diff != 0)
-        {
-            if (min_diff < 0)
+            take_tz_mutex();
+            mcu_local_time = *localtime(&msg.utc_time);
+            give_tz_mutex();
+    
+            gpio_set_level(GPIO_LED, gpio_get_level(GPIO_LED) ? 0 : 1);
+    
+            if (mcu_local_time.tm_sec != 0) // only sync at full minutes
             {
-                min_diff = 12 * 60 - min_diff;
+                continue;
             }
-            PRINT_LOG("Needing %d minute ticks for compensation", min_diff);
+
+            int mcu_minutes_midnight = mcu_local_time.tm_hour * 60 + mcu_local_time.tm_min;
+            clock_minutes_diff = mcu_minutes_midnight - clock_minutes_midnight;
+
+            // can not set counter clockwise difference, need to go clockwise -> wrap difference
+            if (clock_minutes_diff < 0)
+            {
+                clock_minutes_diff = 12 * 60 - clock_minutes_diff;
+            }
+
+            PRINT_LOG("%d minutes time difference to target: %02d:%02d",
+                clock_minutes_diff, mcu_local_time.tm_hour, mcu_local_time.tm_min);
         }
-
-        clock_hour_hand = mcu_local_time.tm_hour;
-        clock_minute_hand = mcu_local_time.tm_min;
-
-        PRINT_LOG("Hours: %d Minutes: %d", clock_hour_hand, clock_minute_hand);
     }
 }

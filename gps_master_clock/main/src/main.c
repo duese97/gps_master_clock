@@ -184,9 +184,6 @@ bool sendTaskMessageISR(task_msg_t *msg)
 
 void app_main(void)
 {
-    gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
-    gpio_set_level(GPIO_LED, 0);
-
     init_serial_print();
 
     SETUP_QUEUE(NEO6M, QUEUE_LEN_GENERAL);
@@ -215,6 +212,5 @@ void app_main(void)
     while(1)
     {
         vTaskDelay(1000);
-        gpio_set_level(GPIO_LED, !gpio_get_level(GPIO_LED));
     }
 }
