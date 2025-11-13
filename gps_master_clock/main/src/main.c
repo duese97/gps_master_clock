@@ -1,17 +1,20 @@
+#include "custom_main.h"
+
 #include <stdio.h>
 #include <string.h>
 
+// peripherals
 #include "driver/gpio.h"
 #include "driver/uart.h"
+#include "bsp.h"
 
+// for OS methods
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include "bsp.h"
-#include "custom_main.h"
-
+// to get the task handles
 #include "neo6m.h"
-
+#include "timekeep.h"
 
 #define SETUP_TASK_VARS(taskname, stacksize, queueElemByteCnt) \
     static StackType_t taskStack##taskname[stacksize];         \
@@ -40,26 +43,30 @@
 #define QUEUE_MAX_BLOCK_MS 100
 
 // static stack sizes (printf related stuff needs a lot of RAM)
-#define STACKSIZE_NEO6M 4096
-#define STACKSIZE_LCD   2048
+#define STACKSIZE_NEO6M     4096
+#define STACKSIZE_TIMEKEEP  2028
+#define STACKSIZE_LCD       2048
 
 /* TASK */
 enum
 {
     // priorities (higher number = higher prio)
     TASK_PRIO_LCD = 1,
+    TASK_PRIO_TIMEKEEP,
     TASK_PRIO_NEO6M,
 };
 
 // task stacks, task handles (for inter task communication) and messaging
-SETUP_TASK_VARS(NEO6M, STACKSIZE_NEO6M, QUEUE_STORAGE_GENERAL);
 SETUP_TASK_VARS(LCD, STACKSIZE_LCD, QUEUE_STORAGE_GENERAL);
+SETUP_TASK_VARS(TIMEKEEP, STACKSIZE_TIMEKEEP, QUEUE_STORAGE_GENERAL);
+SETUP_TASK_VARS(NEO6M, STACKSIZE_NEO6M, QUEUE_STORAGE_GENERAL);
 
 // for fast and uncomplicated assignment of task ID<->queue
 static const QueueHandle_t *handleLookup[] =
 {
-        [TASK_LCD] = &queueHandleNEO6M,
-        [TASK_NEO6M] = &queueHandleLCD,
+        [TASK_LCD]      = &queueHandleNEO6M,
+        [TASK_TIMEKEEP] = &queueHandleTIMEKEEP,
+        [TASK_NEO6M]    = &queueHandleLCD,
 };
 
 // for logging
@@ -116,7 +123,7 @@ bool receiveTaskMessage(task_type_t dst, uint32_t timeout, task_msg_t *msg)
     bool success = false;
     QueueHandle_t handle = NULL;
 
-    if (dst < sizeof(handleLookup) / sizeof(handleLookup[0]))
+    if (dst < (sizeof(handleLookup) / sizeof(handleLookup[0])))
     {
         handle = *(handleLookup[dst]); // determine queue handle
     }
@@ -156,12 +163,34 @@ bool sendTaskMessage(task_msg_t *msg)
     return success;
 }
 
+bool sendTaskMessageISR(task_msg_t *msg)
+{
+    QueueHandle_t handle = NULL;
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE; // not woken any task at start of ISR
+
+    if (msg->dst < sizeof(handleLookup) / sizeof(handleLookup[0]))
+    {
+        handle = *(handleLookup[msg->dst]); // determine queue handle
+    }
+
+    if (handle)
+    {
+        xQueueSendFromISR(handle, (void *)msg, &xHigherPriorityTaskWoken);
+    }
+
+    return xHigherPriorityTaskWoken;
+}
+
+
 void app_main(void)
 {
     gpio_set_direction(GPIO_LED, GPIO_MODE_OUTPUT);
     gpio_set_level(GPIO_LED, 0);
 
     init_serial_print();
+
+    SETUP_QUEUE(NEO6M, QUEUE_LEN_GENERAL);
+    SETUP_QUEUE(TIMEKEEP, QUEUE_LEN_GENERAL);
 
     taskHandleNEO6M = xTaskCreateStatic(
         neo6M_Task,
@@ -171,6 +200,16 @@ void app_main(void)
         TASK_PRIO_NEO6M,
         taskStackNEO6M,
         &taskBufferNEO6M
+    );
+
+    taskHandleTIMEKEEP = xTaskCreateStatic(
+        timekeep_Task,
+        "timekeep",
+        STACKSIZE_TIMEKEEP,
+        NULL,
+        TASK_PRIO_TIMEKEEP,
+        taskStackTIMEKEEP,
+        &taskBufferTIMEKEEP
     );
 
     while(1)

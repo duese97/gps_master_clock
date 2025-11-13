@@ -2,13 +2,18 @@
 
 #include "custom_main.h"
 
+#include <math.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+
 #include "driver/uart.h"
 #include "driver/gptimer.h"
+#include "bsp.h"
+
+#include "timekeep.h"
 #include "TinyGPS_wrapper.h"
 
-#include "bsp.h"
 
 #define SECOND_TIMER_PERIOD_US 1000000ULL
 
@@ -32,11 +37,16 @@ const int intr_alloc_flags =
 
 static volatile time_t mcu_utc;
 
-struct tm mcu_local_time;
+
 
 static void periodic_timer_callback(void* arg)
 {
+    static task_msg_t msg = {.dst = TASK_TIMEKEEP, .cmd = SECOND_TRIGGER }; // prepare message
     mcu_utc++;
+
+    msg.utc_time = mcu_utc;
+
+    sendTaskMessageISR(&msg);
 }
 
 static const esp_timer_create_args_t periodic_timer_args =
@@ -46,14 +56,7 @@ static const esp_timer_create_args_t periodic_timer_args =
     .name = "secTimer"
 };
 
-static void print_time(struct tm* tm)
-{
-    PRINT_LOG("%02d:%02d:%02d %d.%d.%d DST: %d",
-        tm->tm_hour, tm->tm_min, tm->tm_sec,
-        tm->tm_mday, tm->tm_mon + 1, tm->tm_year + 1900,
-        tm->tm_isdst
-    );
-}
+
 
 void neo6M_Task(void *parameter)
 {
@@ -63,6 +66,7 @@ void neo6M_Task(void *parameter)
     time_t last_connected_utc = 0;
     uint32_t age;
     bool synced_once = false;
+    double total_time_corrected = 0;
 
     // setup the UART for the neo6M module
     ESP_ERROR_CHECK(uart_driver_install(NEO6M_UART, 256 /*must be at least this big(?)*/, 0, 0, NULL, intr_alloc_flags));
@@ -78,14 +82,7 @@ void neo6M_Task(void *parameter)
         int res = uart_read_bytes(NEO6M_UART, &buf, sizeof(buf), 2000); // normally data should frequently come in
         if (res <= 0) 
         { // timed out or any other error
-            if (synced_once)
-            {
-                time_t snapshot = mcu_utc; // Not sure if needed, better copy data
-
-                PRINT_LOG("No GPS signal, local time:");
-                mcu_local_time = *localtime(&snapshot);
-                print_time(&mcu_local_time);
-            }
+            PRINT_LOG("No GPS signal");
             continue;
         }
 
@@ -115,25 +112,22 @@ void neo6M_Task(void *parameter)
             continue;
         }
 
-        // do not perform too many prints, once every seconds is sufficient
-        if (gps_local_time.tm_sec != last_gps_time.tm_sec)
-        {
-            print_time(&gps_local_time);
-        }
-
         // determine time difference between local clock and received time
         double clock_diff = difftime(mcu_utc, last_connected_utc);
-        if (clock_diff > 5)
+        if (fabs(clock_diff) > 5)
         { // too great, adjust
             esp_timer_stop(periodic_timer); // halt timer
             mcu_utc = last_connected_utc; // set new UTC timestamp
             esp_timer_restart(periodic_timer, SECOND_TIMER_PERIOD_US); // restart timer
+
+            total_time_corrected += fabs(clock_diff);
         }
 
         // once every minute: print the delta unconditionally
         if ((gps_local_time.tm_min != last_gps_time.tm_min) || (gps_local_time.tm_hour != last_gps_time.tm_hour))
         {
-            PRINT_LOG("MCU <-> GPS delta: %.0fs", clock_diff);
+            print_tm_time("GPS time: ", &gps_local_time);
+            PRINT_LOG("MCU <-> GPS delta: %.0fs, total corrected: %.0f", clock_diff, total_time_corrected);
         }
 
         last_gps_time = gps_local_time; // remember last time

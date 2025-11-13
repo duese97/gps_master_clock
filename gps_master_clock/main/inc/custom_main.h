@@ -7,6 +7,7 @@
 #include "freertos/FreeRTOS.h" // for semaphore
 #include "esp_timer.h" // for micorsecond timer
 
+#include <time.h> // for time_t
 
 //---------------------------------------------------------------------------
 // Enums
@@ -14,6 +15,7 @@
 typedef enum
 {
   TASK_LCD,
+  TASK_TIMEKEEP,
   TASK_NEO6M,
 } task_type_t;
 
@@ -22,6 +24,8 @@ typedef enum
 typedef enum
 {
   TASK_CMD_START = 0,
+  SECOND_TRIGGER = TASK_CMD_START,
+
   NUM_TASK_CMD
 } task_cmd_t;
 
@@ -34,7 +38,7 @@ typedef struct
   task_cmd_t cmd;
   union // payload, can be unused
   {
-
+    time_t utc_time;
   };
 } task_msg_t;
 
@@ -48,6 +52,10 @@ extern char print_buf[MAX_LOG_LEN];
 
 /* exported functions */
 void serial_print_custom(void);
+bool receiveTaskMessage(task_type_t dst, uint32_t timeout, task_msg_t *msg);
+bool sendTaskMessage(task_msg_t *msg);
+bool sendTaskMessageISR(task_msg_t *msg);
+
 
 /* exported macros */
 #define ESP_IDF_MILLIS() (uint32_t)((esp_timer_get_time() / 1000))

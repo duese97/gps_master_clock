@@ -34,6 +34,9 @@
     "stdio.h": "c",
     "neo6m.h": "c",
     "task.h": "c",
-    "bsp.h": "c"
+    "bsp.h": "c",
+    "timekeep.h": "c",
+    "string.h": "c",
+    "complex": "c"
   }
 }

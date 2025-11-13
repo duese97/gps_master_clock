@@ -2,6 +2,10 @@
 #include "TinyGPS.h"
 #include "TinyGPS_wrapper.h"
 
+extern "C" {
+    #include "timekeep.h" // for TZ mutex
+}
+
 TinyGPS gps;
 
 
@@ -26,9 +30,9 @@ void TinyGPS_wrapper_crack_datetime(struct tm* local, time_t* utc, uint32_t* age
     tim.tm_sec = sec;
     tim.tm_isdst = -1;
 
-    // Suspend all other tasks. For the case that the local time is calculated by another TASK
-    // we want to have the proper timezone! The following hack alone would mess with that.
-    //vTaskSuspendAll();
+    // For the case that the local time is calculated by another TASK we want to have the
+    // proper timezone! Acquire lock
+    take_tz_mutex();
 
     // workaround: timegm POSIX function is not available, but we need to convert the
     // time struct to UTC timestamp first.
@@ -42,7 +46,7 @@ void TinyGPS_wrapper_crack_datetime(struct tm* local, time_t* utc, uint32_t* age
     setenv("TZ","CET-1CEST,M3.5.0,M10.5.0/3",1);
     tzset();
 
-    //xTaskResumeAll(); // scheduler can continue normally
+    give_tz_mutex(); // release lock again, other tasks can now calculate local time again
 
     // Take timezone + daylight saving into account
     *local = *localtime(utc);
