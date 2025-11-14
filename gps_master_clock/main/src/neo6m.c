@@ -123,11 +123,11 @@ void neo6M_Task(void *parameter)
             total_time_corrected += fabs(clock_diff);
         }
 
-        // once every minute: print the delta unconditionally
+        // once every minute: print the delta unconditionally (or immediately if the sync was more than a minute ago)
         if ((gps_local_time.tm_min != last_gps_time.tm_min) || (gps_local_time.tm_hour != last_gps_time.tm_hour))
         {
             print_tm_time("GPS time: ", &gps_local_time);
-            PRINT_LOG("MCU <-> GPS delta: %.0fs, total corrected: %.0f", clock_diff, total_time_corrected);
+            PRINT_LOG("MCU <-> GPS delta: %.0fs, total corrected: %.0lf", clock_diff, total_time_corrected);
         }
 
         last_gps_time = gps_local_time; // remember last time

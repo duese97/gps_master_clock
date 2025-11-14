@@ -6,12 +6,10 @@
 
 static SemaphoreHandle_t tz_mutex;
 
-static struct tm target_local_time;
-
-static int clock_minutes_midnight = 0; // local minutes after midnight
+static int current_minutes_12o_clock = 0; // local minutes after 12 o clock position
 static int clock_minutes_diff = 0; // difference to correct time
 
-int pulse_len_ms, pulse_pause_ms;
+int pulse_len_ms = 100, pulse_pause_ms = 100;
 
 void take_tz_mutex(void)
 {
@@ -43,65 +41,85 @@ void print_tm_time(char* additional_str, struct tm* tm)
 
 void timekeep_Task(void *parameter)
 {
+    struct tm target_local_time;
     task_msg_t msg;
+    bool synced_once = false;
     gpio_set_direction(GPIO_LED, GPIO_MODE_INPUT_OUTPUT);
 
     while(1)
     {
-        if (receiveTaskMessage(TASK_TIMEKEEP, 10, &msg) == false)
-        { // reception did not work
+        if (receiveTaskMessage(TASK_TIMEKEEP, 10, &msg) == true)
+        {
+            if(msg.cmd == SECOND_TRIGGER)
+            {
+                // Toggle LED to indicate activity
+                gpio_set_level(GPIO_LED, gpio_get_level(GPIO_LED) ? 0 : 1);
+
+                take_tz_mutex();
+                // In case any process outside of this application (lwip,..?) changed the timezone.
+                setenv("TZ","CET-1CEST,M3.5.0,M10.5.0/3",1); // For details see TinyGPS_wrapper_crack_datetime()
+                target_local_time = *localtime(&msg.utc_time);
+                give_tz_mutex();
+        
+                if (target_local_time.tm_sec != 0) // only sync at full minutes
+                {
+                    continue;
+                }
+
+                int target_minutes_12o_clock = target_local_time.tm_hour % 12; // we only have a 12 hour clock
+                target_minutes_12o_clock *= 60; // 60 minutes per hour
+                target_minutes_12o_clock += target_local_time.tm_min; // add minutes normally
+
+                // determine the current difference
+                clock_minutes_diff = target_minutes_12o_clock - current_minutes_12o_clock;
+
+                // wrote time at least once
+                synced_once = true;
+
+                if (clock_minutes_diff == 0) // perfectly synced
+                {
+                    continue;
+                }
+
+                if (clock_minutes_diff < 0) // can not set counter clockwise difference, need special handling
+                {
+                    if (clock_minutes_diff < -MAX_LOCAL_CLOCK_LEAD_MINUTES) // if difference too large -> need to wrap around
+                    {
+                        clock_minutes_diff = 12 * 60 - clock_minutes_diff;
+                    }
+                    else // difference is not too much, we can just wait
+                    {
+                        PRINT_LOG("Time slightly leads, waiting %d minutes ...", clock_minutes_diff);
+                        continue;
+                    }
+                }
+
+                PRINT_LOG("%02d:%02d -> %d minutes time difference to target -> %02d:%02d(%02d:%02d)",
+                    current_minutes_12o_clock / 60, current_minutes_12o_clock % 60,
+                    clock_minutes_diff,
+                    target_local_time.tm_hour % 12, target_local_time.tm_min,
+                    target_local_time.tm_hour, target_local_time.tm_min);
+            }
+        } // else: no new messages
+
+        if (synced_once == false)
+        {
             continue;
         }
 
-        if(msg.cmd == SECOND_TRIGGER)
-        {
-            take_tz_mutex();
-            // In case any process outside of this application (lwip,..?) changed the timezone.
-            setenv("TZ","CET-1CEST,M3.5.0,M10.5.0/3",1); // For details see TinyGPS_wrapper_crack_datetime()
-            target_local_time = *localtime(&msg.utc_time);
-            give_tz_mutex();
-
-            // Toggle LED to indicate activity
-            gpio_set_level(GPIO_LED, gpio_get_level(GPIO_LED) ? 0 : 1);
-    
-            if (target_local_time.tm_sec != 0) // only sync at full minutes
-            {
-                continue;
-            }
-
-            int target_minutes_midnight = target_local_time.tm_hour * 60 + target_local_time.tm_min;
-            clock_minutes_diff = target_minutes_midnight - clock_minutes_midnight;
-
-            if (clock_minutes_diff == 0) // perfectly synced
-            {
-                continue;
-            }
-
-            if (clock_minutes_diff < 0) // can not set counter clockwise difference, need special handling
-            {
-                if (clock_minutes_diff < -MAX_LOCAL_CLOCK_LEAD_MINUTES) // if difference too large -> need to wrap around
-                {
-                    clock_minutes_diff = 12 * 60 - clock_minutes_diff;
-                }
-                else // difference is not too much, we can just wait
-                {
-                    PRINT_LOG("Time slightly leads, waiting %d minutes ...", clock_minutes_diff);
-                    continue;
-                }
-            }
-
-            PRINT_LOG("%d minutes time difference to target: %02d:%02d",
-                clock_minutes_diff, target_local_time.tm_hour, target_local_time.tm_min);
-        }
-
-        if (clock_minutes_diff)
+        if (clock_minutes_diff > 0) // no backwards pulses possible
         { // if we come here: do clock pulses
             // set GPIO(s)
+            gpio_set_level(GPIO_LED, 0);
             vTaskDelay(pulse_len_ms / portTICK_PERIOD_MS);
             // set GPIO(s)
+            gpio_set_level(GPIO_LED, 1);
             vTaskDelay(pulse_pause_ms / portTICK_PERIOD_MS);
 
-            clock_minutes_midnight++; // one step closer to the target time
+            // Set GPIO(s)
+            gpio_set_level(GPIO_LED, 0);
+            current_minutes_12o_clock++; // one step closer to the target time
+            clock_minutes_diff--;
         }
     }
 }
