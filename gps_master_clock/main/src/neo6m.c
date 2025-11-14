@@ -66,7 +66,7 @@ void neo6M_Task(void *parameter)
     time_t last_connected_utc = 0;
     uint32_t age;
     bool synced_once = false;
-    double total_time_corrected = 0;
+    int total_time_corrected = 0;
 
     // setup the UART for the neo6M module
     ESP_ERROR_CHECK(uart_driver_install(NEO6M_UART, 256 /*must be at least this big(?)*/, 0, 0, NULL, intr_alloc_flags));
@@ -113,21 +113,22 @@ void neo6M_Task(void *parameter)
         }
 
         // determine time difference between local clock and received time
-        double clock_diff = difftime(mcu_utc, last_connected_utc);
-        if (fabs(clock_diff) > MAX_ALLOWED_LOCAL_CLOCK_DRIFT_SECONDS)
+        int clock_diff = difftime(mcu_utc, last_connected_utc);
+        if (abs(clock_diff) > MAX_ALLOWED_LOCAL_CLOCK_DRIFT_SECONDS)
         { // too great, adjust
-            esp_timer_stop(periodic_timer); // halt timer, it does read-modify-write of the variable (not atomic)!
+            PRINT_LOG("Local clock drifted by: %d, halting and re-adjusting", clock_diff);
+            ESP_ERROR_CHECK(esp_timer_stop(periodic_timer)); // halt timer, it does read-modify-write of the variable (not atomic)!
             mcu_utc = last_connected_utc; // set new UTC timestamp
-            esp_timer_restart(periodic_timer, SECOND_TIMER_PERIOD_US); // restart timer
+            ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US)); // restart timer
 
-            total_time_corrected += fabs(clock_diff);
+            total_time_corrected += abs(clock_diff);
         }
 
         // once every minute: print the delta unconditionally (or immediately if the sync was more than a minute ago)
         if ((gps_local_time.tm_min != last_gps_time.tm_min) || (gps_local_time.tm_hour != last_gps_time.tm_hour))
         {
             print_tm_time("GPS time: ", &gps_local_time);
-            PRINT_LOG("MCU <-> GPS delta: %.0fs, total corrected: %.0lf", clock_diff, total_time_corrected);
+            PRINT_LOG("MCU <-> GPS delta: %ds, total seconds corrected: %d", clock_diff, total_time_corrected);
         }
 
         last_gps_time = gps_local_time; // remember last time
