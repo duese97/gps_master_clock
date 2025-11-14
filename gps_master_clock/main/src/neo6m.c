@@ -114,9 +114,9 @@ void neo6M_Task(void *parameter)
 
         // determine time difference between local clock and received time
         double clock_diff = difftime(mcu_utc, last_connected_utc);
-        if (fabs(clock_diff) > 5)
+        if (fabs(clock_diff) > MAX_ALLOWED_LOCAL_CLOCK_DRIFT_SECONDS)
         { // too great, adjust
-            esp_timer_stop(periodic_timer); // halt timer
+            esp_timer_stop(periodic_timer); // halt timer, it does read-modify-write of the variable (not atomic)!
             mcu_utc = last_connected_utc; // set new UTC timestamp
             esp_timer_restart(periodic_timer, SECOND_TIMER_PERIOD_US); // restart timer
 

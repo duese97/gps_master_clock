@@ -1,13 +1,30 @@
 #ifndef _CUSTOM_MAIN_H_
 #define _CUSTOM_MAIN_H_
 
-#define MAX_LOG_WAIT_MS 10              // time to wait for UART to become available
-#define MAX_LOG_LEN 256                 // maximum log message length, includes timestamp + func name
+
+//---------------------------------------------------------------------------
+// Global includes
+//---------------------------------------------------------------------------
 
 #include "freertos/FreeRTOS.h" // for semaphore
 #include "esp_timer.h" // for micorsecond timer
 
 #include <time.h> // for time_t
+
+//---------------------------------------------------------------------------
+// Defines
+//---------------------------------------------------------------------------
+
+#define MAX_LOG_WAIT_MS 10              // time to wait for UART to become available
+#define MAX_LOG_LEN 256                 // maximum log message length, includes timestamp + func name
+
+// The maximum time in minutes the local clock can lead in minutes, before a wraparound must happen
+#define MAX_LOCAL_CLOCK_LEAD_MINUTES  5
+
+// The amount of time that the local second timebase can drift away from the 'correct' time.
+// A bit of 'wiggle' room is left, since the correction requires starting and stopping the
+// timer interrupt.
+#define MAX_ALLOWED_LOCAL_CLOCK_DRIFT_SECONDS 2
 
 //---------------------------------------------------------------------------
 // Enums

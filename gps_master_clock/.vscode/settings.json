@@ -37,6 +37,7 @@
     "bsp.h": "c",
     "timekeep.h": "c",
     "string.h": "c",
-    "complex": "c"
+    "complex": "c",
+    "esp_timer.h": "c"
   }
 }
