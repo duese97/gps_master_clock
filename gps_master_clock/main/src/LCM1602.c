@@ -13,7 +13,7 @@
 uint32_t max_wait_ticks = MAX_WAIT_TICKS; // amount of ticks to wait for blocking read/write
 i2c_master_bus_config_t bus_conf =
 {
-	//.clk_source = I2C_CLK_SRC_DEFAULT,
+	.clk_source = I2C_CLK_SRC_DEFAULT,
 	.i2c_port = I2C_PORT_NUM,
 	.scl_io_num = I2C_SCL_IO,
 	.sda_io_num = I2C_SDA_IO,
@@ -42,7 +42,7 @@ static void lcm1602_command(uint8_t value)
 	vTaskDelay(1);
 }
 
-static void lcm1602_write(uint8_t value)
+static void lcm1602_write(char value)
 {
 	uint8_t tx_data[] = {0x40, value};
 	esp_err_t ret = i2c_master_transmit(dev_handle, tx_data, sizeof(tx_data), max_wait_ticks);
@@ -53,7 +53,7 @@ static void lcm1602_write(uint8_t value)
 	vTaskDelay(1);
 }
 
-void lcm1602_init(void)
+esp_err_t lcm1602_init(void)
 {
     esp_err_t ret = i2c_new_master_bus(&bus_conf, &bus_handle);
 	if (ret != ESP_OK)
@@ -87,7 +87,6 @@ void lcm1602_init(void)
 		lcm1602_command(FUNCTIONSET | _2LINE);
 		vTaskDelay(10);
 	
-	
 		lcm1602_display();
 		ets_delay_us(40);
 		lcm1602_clear();
@@ -96,6 +95,8 @@ void lcm1602_init(void)
 	
 		lcm1602_setCursor(0,0);
 	}
+
+	return ret;
 }
 
 void lcm1602_display() 
@@ -137,9 +138,8 @@ void lcm1602_scrollDisplayLeft(void)
 
 void lcm1602_print(const char c[])
 {
-	for(int i =0; i < strlen(c); i++ ) 
+	for(int i =0; i < strlen(c) && i < LCM1602_MAX_COLS; i++ ) 
 	{
-		char x = c[i];
-		lcm1602_write((int)x);
+		lcm1602_write(c[i]);
 	}	
 }

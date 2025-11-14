@@ -4,6 +4,8 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "esp_err.h" // for the error typedef
+
 //Instruction Set
 #define CLEARDISPLAY 0X01
 #define CURSORSHIFT 0x10
@@ -42,7 +44,7 @@
 #define _8BITMODE 0x10
 #define _4BITMODE 0x00
 
-void lcm1602_init(void);
+esp_err_t lcm1602_init(void);
 void lcm1602_display();
 void lcm1602_noDisplay();
 void lcm1602_clear();

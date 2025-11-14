@@ -38,6 +38,8 @@
     "timekeep.h": "c",
     "string.h": "c",
     "complex": "c",
-    "esp_timer.h": "c"
+    "esp_timer.h": "c",
+    "lcm1602.h": "c",
+    "i2c_master.h": "c"
   }
 }

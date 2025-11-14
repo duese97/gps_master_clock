@@ -15,6 +15,7 @@
 // to get the task handles
 #include "neo6m.h"
 #include "timekeep.h"
+#include "LCD.h"
 
 #define SETUP_TASK_VARS(taskname, stacksize, queueElemByteCnt) \
     static StackType_t taskStack##taskname[stacksize];         \
@@ -45,7 +46,7 @@
 // static stack sizes (printf related stuff needs a lot of RAM)
 #define STACKSIZE_NEO6M     4096
 #define STACKSIZE_TIMEKEEP  2028
-#define STACKSIZE_LCD       2048
+#define STACKSIZE_LCD       4096
 
 /* TASK */
 enum
@@ -64,9 +65,9 @@ SETUP_TASK_VARS(NEO6M, STACKSIZE_NEO6M, QUEUE_STORAGE_GENERAL);
 // for fast and uncomplicated assignment of task ID<->queue
 static const QueueHandle_t *handleLookup[] =
 {
-        [TASK_LCD]      = &queueHandleNEO6M,
+        [TASK_LCD]      = &queueHandleLCD,
         [TASK_TIMEKEEP] = &queueHandleTIMEKEEP,
-        [TASK_NEO6M]    = &queueHandleLCD,
+        [TASK_NEO6M]    = &queueHandleNEO6M,
 };
 
 // for logging
@@ -186,8 +187,11 @@ void app_main(void)
 {
     init_serial_print();
 
+    PRINT_LOG("\nStarting application...\n");
+
     SETUP_QUEUE(NEO6M, QUEUE_LEN_GENERAL);
     SETUP_QUEUE(TIMEKEEP, QUEUE_LEN_GENERAL);
+    SETUP_QUEUE(LCD, QUEUE_LEN_GENERAL);
 
     taskHandleNEO6M = xTaskCreateStatic(
         neo6M_Task,
@@ -207,6 +211,16 @@ void app_main(void)
         TASK_PRIO_TIMEKEEP,
         taskStackTIMEKEEP,
         &taskBufferTIMEKEEP
+    );
+
+    taskHandleLCD = xTaskCreateStatic(
+        LCD_Task,
+        "LCD",
+        STACKSIZE_LCD,
+        NULL,
+        TASK_PRIO_LCD,
+        taskStackLCD,
+        &taskBufferLCD
     );
 
     while(1)
