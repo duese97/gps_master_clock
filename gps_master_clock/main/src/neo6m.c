@@ -60,12 +60,16 @@ static const esp_timer_create_args_t periodic_timer_args =
 
 void neo6M_Task(void *parameter)
 {
+     // prepare message
+    static task_msg_t msg_locked = {.dst = TASK_LCD, .cmd = GPS_LOCK_STATE };
+
     char buf;
     struct tm last_gps_time = {0};
     struct tm gps_local_time = {0}; 
     time_t last_connected_utc = 0;
     uint32_t age;
-    bool synced_once = false;
+
+    LOCK_STATE_t lock_state = LOCK_UNINITIALIZED;
     int total_time_corrected = 0;
 
     // setup the UART for the neo6M module
@@ -83,6 +87,13 @@ void neo6M_Task(void *parameter)
         if (res <= 0) 
         { // timed out or any other error
             PRINT_LOG("No GPS signal");
+
+            if (lock_state != LOCK_LOST) // only need to set state / send message once
+            {
+                lock_state = LOCK_LOST;
+                msg_locked.lock_state = LOCK_LOST;
+                sendTaskMessage(&msg_locked);
+            }
             continue;
         }
 
@@ -99,17 +110,31 @@ void neo6M_Task(void *parameter)
             continue;
         }
         
-        if (synced_once == false)
+        if (lock_state == LOCK_UNINITIALIZED)
         {
-            PRINT_LOG("Inital sync");
-            synced_once = true;
             last_gps_time = gps_local_time;
 
             mcu_utc = last_connected_utc;
 
             // start cyclic timer
             ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US));
+
+            PRINT_LOG("Inital lock");
+
+            lock_state = LOCKED_FIST;
+            msg_locked.lock_state = LOCKED_FIST;
+            sendTaskMessage(&msg_locked);
             continue;
+        }
+
+        if (lock_state != LOCKED_AGAIN)
+        {
+            if (lock_state != LOCKED_FIST) // do not overwrite first locked state
+            {
+                msg_locked.lock_state = LOCKED_AGAIN;
+                sendTaskMessage(&msg_locked);
+            }
+            lock_state = LOCKED_AGAIN;
         }
 
         // determine time difference between local clock and received time

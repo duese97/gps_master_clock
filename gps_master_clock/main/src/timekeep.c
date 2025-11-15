@@ -7,9 +7,9 @@
 static SemaphoreHandle_t tz_mutex;
 
 static int current_minutes_12o_clock = 0; // local minutes after 12 o clock position
-static int clock_minutes_diff = 0; // difference to correct time
 
 int pulse_len_ms = 100, pulse_pause_ms = 100;
+
 
 void take_tz_mutex(void)
 {
@@ -41,9 +41,11 @@ void print_tm_time(char* additional_str, struct tm* tm)
 
 void timekeep_Task(void *parameter)
 {
+    static task_msg_t local_time_msg = {.dst = TASK_LCD, .cmd = LOCAL_TIME };
+    int clock_minutes_diff = 0; // difference to correct time
     struct tm target_local_time;
     task_msg_t msg;
-    bool synced_once = false;
+    bool locked_once = false;
     gpio_set_direction(GPIO_LED, GPIO_MODE_INPUT_OUTPUT);
 
     while(1)
@@ -60,6 +62,9 @@ void timekeep_Task(void *parameter)
                 setenv("TZ","CET-1CEST,M3.5.0,M10.5.0/3",1); // For details see TinyGPS_wrapper_crack_datetime()
                 target_local_time = *localtime(&msg.utc_time);
                 give_tz_mutex();
+
+                local_time_msg.local_time = target_local_time;
+                sendTaskMessage(&local_time_msg);
         
                 if (target_local_time.tm_sec != 0) // only sync at full minutes
                 {
@@ -74,7 +79,7 @@ void timekeep_Task(void *parameter)
                 clock_minutes_diff = target_minutes_12o_clock - current_minutes_12o_clock;
 
                 // wrote time at least once
-                synced_once = true;
+                locked_once = true;
 
                 if (clock_minutes_diff == 0) // perfectly synced
                 {
@@ -86,10 +91,11 @@ void timekeep_Task(void *parameter)
                     if (clock_minutes_diff < -MAX_LOCAL_CLOCK_LEAD_MINUTES) // if difference too large -> need to wrap around
                     {
                         clock_minutes_diff = 12 * 60 - clock_minutes_diff;
+                        PRINT_LOG("Local time leads too much, wrapping around");
                     }
                     else // difference is not too much, we can just wait
                     {
-                        PRINT_LOG("Time slightly leads, waiting %d minutes ...", clock_minutes_diff);
+                        PRINT_LOG("Local time slightly leads, waiting %d minutes ...", clock_minutes_diff);
                         continue;
                     }
                 }
@@ -102,7 +108,7 @@ void timekeep_Task(void *parameter)
             }
         } // else: no new messages
 
-        if (synced_once == false)
+        if (locked_once == false)
         {
             continue;
         }
@@ -119,6 +125,10 @@ void timekeep_Task(void *parameter)
             // Set GPIO(s)
             gpio_set_level(GPIO_LED, 0);
             current_minutes_12o_clock++; // one step closer to the target time
+            if (current_minutes_12o_clock >= 12 * 60) // keep within 12 hour bounds
+            {
+                current_minutes_12o_clock = 0;
+            }
             clock_minutes_diff--;
         }
     }

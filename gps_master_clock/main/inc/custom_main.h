@@ -42,9 +42,18 @@ typedef enum
 {
   TASK_CMD_START = 0,
   SECOND_TRIGGER = TASK_CMD_START,
-
+  GPS_LOCK_STATE,
+  LOCAL_TIME,
   NUM_TASK_CMD
 } task_cmd_t;
+
+typedef enum
+{
+    LOCK_UNINITIALIZED,
+    LOCKED_FIST,
+    LOCK_LOST,
+    LOCKED_AGAIN,
+} LOCK_STATE_t;
 
 //---------------------------------------------------------------------------
 // Types
@@ -56,6 +65,8 @@ typedef struct
   union // payload, can be unused
   {
     time_t utc_time;
+    LOCK_STATE_t lock_state;
+    struct tm local_time;
   };
 } task_msg_t;
 
