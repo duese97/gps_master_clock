@@ -112,7 +112,7 @@ void lcm1602_noDisplay()
 void lcm1602_clear()
 {
 	lcm1602_command(CLEARDISPLAY);
-	ets_delay_us(2000);
+	vTaskDelay(1);
 	lcm1602_setCursor(0,0);
 }
 
