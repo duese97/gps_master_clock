@@ -26,6 +26,9 @@
 // timer interrupt.
 #define MAX_ALLOWED_LOCAL_CLOCK_DRIFT_SECONDS 2
 
+#define ARRAY_LEN(x) (sizeof(x)/sizeof(x[0]))
+
+
 //---------------------------------------------------------------------------
 // Enums
 //---------------------------------------------------------------------------
@@ -49,11 +52,10 @@ typedef enum
 
 typedef enum
 {
-    LOCK_UNINITIALIZED,
-    LOCKED_FIST,
-    LOCK_LOST,
-    LOCKED_AGAIN,
-} LOCK_STATE_t;
+    GPS_LOCK_UNINITIALIZED, // lock not yet set
+    GPS_LOCK_LOST, // no communication (with module) possible
+    GPS_LOCKED, // GPS signal received
+} GPS_LOCK_STATE_t;
 
 //---------------------------------------------------------------------------
 // Types
@@ -65,7 +67,7 @@ typedef struct
   union // payload, can be unused
   {
     time_t utc_time;
-    LOCK_STATE_t lock_state;
+    GPS_LOCK_STATE_t lock_state;
     struct tm local_time;
   };
 } task_msg_t;

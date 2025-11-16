@@ -69,8 +69,8 @@ void neo6M_Task(void *parameter)
     time_t last_connected_utc = 0;
     uint32_t age;
 
-    LOCK_STATE_t lock_state = LOCK_UNINITIALIZED;
-    int total_time_corrected = 0;
+    GPS_LOCK_STATE_t lock_state = GPS_LOCK_UNINITIALIZED;
+    int total_pos_time_corrected = 0, total_neg_time_corrected = 0;
 
     // setup the UART for the neo6M module
     ESP_ERROR_CHECK(uart_driver_install(NEO6M_UART, 256 /*must be at least this big(?)*/, 0, 0, NULL, intr_alloc_flags));
@@ -88,10 +88,10 @@ void neo6M_Task(void *parameter)
         { // timed out or any other error
             PRINT_LOG("No GPS signal");
 
-            if (lock_state != LOCK_LOST) // only need to set state / send message once
+            if (lock_state != GPS_LOCK_LOST) // only need to set state / send message once
             {
-                lock_state = LOCK_LOST;
-                msg_locked.lock_state = LOCK_LOST;
+                lock_state = GPS_LOCK_LOST;
+                msg_locked.lock_state = GPS_LOCK_LOST;
                 sendTaskMessage(&msg_locked);
             }
             continue;
@@ -110,7 +110,7 @@ void neo6M_Task(void *parameter)
             continue;
         }
         
-        if (lock_state == LOCK_UNINITIALIZED)
+        if (lock_state == GPS_LOCK_UNINITIALIZED)
         {
             last_gps_time = gps_local_time;
 
@@ -121,39 +121,46 @@ void neo6M_Task(void *parameter)
 
             PRINT_LOG("Inital lock");
 
-            lock_state = LOCKED_FIST;
-            msg_locked.lock_state = LOCKED_FIST;
+            lock_state = GPS_LOCKED;
+            msg_locked.lock_state = GPS_LOCKED;
             sendTaskMessage(&msg_locked);
             continue;
         }
 
-        if (lock_state != LOCKED_AGAIN)
+        if (lock_state != GPS_LOCKED) // avoid sending same message over and over, if lock did not change
         {
-            if (lock_state != LOCKED_FIST) // do not overwrite first locked state
-            {
-                msg_locked.lock_state = LOCKED_AGAIN;
-                sendTaskMessage(&msg_locked);
-            }
-            lock_state = LOCKED_AGAIN;
+            lock_state = GPS_LOCKED;
+            msg_locked.lock_state = GPS_LOCKED;
+            sendTaskMessage(&msg_locked);
         }
 
         // determine time difference between local clock and received time
         int clock_diff = difftime(mcu_utc, last_connected_utc);
         if (abs(clock_diff) > MAX_ALLOWED_LOCAL_CLOCK_DRIFT_SECONDS)
         { // too great, adjust
-            PRINT_LOG("Local clock drifted by: %d, halting and re-adjusting", clock_diff);
             ESP_ERROR_CHECK(esp_timer_stop(periodic_timer)); // halt timer, it does read-modify-write of the variable (not atomic)!
             mcu_utc = last_connected_utc; // set new UTC timestamp
             ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US)); // restart timer
 
-            total_time_corrected += abs(clock_diff);
+            PRINT_LOG("Local clock drifted by: %d, halting and re-adjusting", clock_diff);
+
+            // Accumulate the total drifted time into separate counters
+            if (clock_diff)
+            {
+                total_pos_time_corrected += clock_diff;
+            }
+            else
+            {
+                total_neg_time_corrected += -clock_diff;
+            }
         }
 
         // once every minute: print the delta unconditionally (or immediately if the sync was more than a minute ago)
         if ((gps_local_time.tm_min != last_gps_time.tm_min) || (gps_local_time.tm_hour != last_gps_time.tm_hour))
         {
-            print_tm_time("GPS time: ", &gps_local_time);
-            PRINT_LOG("MCU <-> GPS delta: %ds, total seconds corrected: %d", clock_diff, total_time_corrected);
+            print_tm_time("GPS local time: ", &gps_local_time);
+            PRINT_LOG("MCU <-> GPS delta: %ds, total corrected: pos:%ds neg:%ds",
+                clock_diff, total_pos_time_corrected, total_neg_time_corrected);
         }
 
         last_gps_time = gps_local_time; // remember last time

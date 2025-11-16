@@ -4,10 +4,13 @@
 #include "bsp.h"
 
 
+#define MINUTES_PER_12H  (12*60)
+
 static SemaphoreHandle_t tz_mutex;
 
 static int current_minutes_12o_clock = 0; // local minutes after 12 o clock position
 
+// settings for the pulse waveform
 int pulse_len_ms = 100, pulse_pause_ms = 100;
 
 
@@ -31,11 +34,17 @@ void give_tz_mutex(void)
 
 void print_tm_time(char* additional_str, struct tm* tm)
 {
-    PRINT_LOG("%s%02d:%02d:%02d %d.%d.%d DST: %d",
+    char * tz = getenv("TZ");
+    if (tz == NULL)
+    {
+        tz = "?";
+    }
+
+    PRINT_LOG("%s%02d:%02d:%02d %d.%d.%d DST: %d TZ: %s",
         additional_str,
         tm->tm_hour, tm->tm_min, tm->tm_sec,
         tm->tm_mday, tm->tm_mon + 1, tm->tm_year + 1900,
-        tm->tm_isdst
+        tm->tm_isdst, tz
     );
 }
 
@@ -59,7 +68,7 @@ void timekeep_Task(void *parameter)
 
                 take_tz_mutex();
                 // In case any process outside of this application (lwip,..?) changed the timezone.
-                setenv("TZ","CET-1CEST,M3.5.0,M10.5.0/3",1); // For details see TinyGPS_wrapper_crack_datetime()
+                setenv("TZ","CET-1CEST,M3.5.0,M10.5.0/3", 1); // For details see TinyGPS_wrapper_crack_datetime()
                 target_local_time = *localtime(&msg.utc_time);
                 give_tz_mutex();
 
@@ -86,11 +95,24 @@ void timekeep_Task(void *parameter)
                     continue;
                 }
 
-                if (clock_minutes_diff < 0) // can not set counter clockwise difference, need special handling
+                if (clock_minutes_diff > 0)
+                {
+                    int minutes_lead = (clock_minutes_diff + MAX_LOCAL_CLOCK_LEAD_MINUTES) % MINUTES_PER_12H;
+
+                    // caution around 12'o clock position: if our local time is 00:00 or after, and the
+                    // received GPS time is before 00:00 -> large difference, where it would make sense to wait!
+                    if (minutes_lead < MAX_LOCAL_CLOCK_LEAD_MINUTES)
+                    {
+                        clock_minutes_diff = -minutes_lead; // this way is 'shorter'
+                        PRINT_LOG("Local time leads slightly, with the GPS time about to wrap");
+                        continue;
+                    }
+                }
+                else if (clock_minutes_diff < 0) // can not set counter clockwise difference, need special handling
                 {
                     if (clock_minutes_diff < -MAX_LOCAL_CLOCK_LEAD_MINUTES) // if difference too large -> need to wrap around
                     {
-                        clock_minutes_diff = 12 * 60 - clock_minutes_diff;
+                        clock_minutes_diff = MINUTES_PER_12H - clock_minutes_diff;
                         PRINT_LOG("Local time leads too much, wrapping around");
                     }
                     else // difference is not too much, we can just wait
@@ -125,7 +147,7 @@ void timekeep_Task(void *parameter)
             // Set GPIO(s)
             gpio_set_level(GPIO_LED, 0);
             current_minutes_12o_clock++; // one step closer to the target time
-            if (current_minutes_12o_clock >= 12 * 60) // keep within 12 hour bounds
+            if (current_minutes_12o_clock >= MINUTES_PER_12H) // keep within 12 hour bounds
             {
                 current_minutes_12o_clock = 0;
             }
