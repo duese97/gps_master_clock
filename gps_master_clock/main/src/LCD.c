@@ -49,13 +49,15 @@ void LCD_Task(void *parameter)
 
     PRINT_LOG("LCD init done");
 
-    // for some reason the driver has no backslash, create one ourself
-    LCD_I2C_createChar(GRAM_BACKSLASH_INDEX, backslash_charmap);
-
     LCD_I2C_setCursor(0, 0);
     LCD_I2C_print("GPS Master Clock");
     LCD_I2C_setCursor(0, 1);
     LCD_I2C_print("  2025 D.Weber  ");
+
+    // for some reason the driver has no backslash, create one ourself
+    // for some other reason writing to GRAM only works after the prints above
+    LCD_I2C_createChar(GRAM_BACKSLASH_INDEX, backslash_charmap);
+
     vTaskDelay(1000);
 
     while(1)
@@ -109,7 +111,14 @@ void LCD_Task(void *parameter)
         // print the result
         scratch_buff[NUM_COLUMNS] = 0;
         LCD_I2C_setCursor(0, 0);
-        LCD_I2C_print(scratch_buff);
+        if (LCD_I2C_print(scratch_buff) != ESP_OK)
+        {
+            PRINT_LOG("Unable to print time to LCD");
+            while(1)
+            {
+                receiveTaskMessage(TASK_LCD, 500, &msg);
+            }
+        }
 
         if (lock_state_local != GPS_LOCKED)
         {

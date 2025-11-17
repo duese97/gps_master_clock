@@ -29,7 +29,7 @@ const i2c_device_config_t dev_conf =
 {
 	.dev_addr_length = I2C_ADDR_BIT_LEN_7,
 	.device_address = LCM1602_ADDR,
-	.scl_speed_hz = I2C_FREQ_HZ,
+	.scl_speed_hz = I2C_FREQ_HZ
 };
 
 static i2c_master_bus_handle_t bus_handle;
