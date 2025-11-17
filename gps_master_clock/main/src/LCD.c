@@ -47,6 +47,8 @@ void LCD_Task(void *parameter)
         }
     }
 
+    PRINT_LOG("LCD init done");
+
     // for some reason the driver has no backslash, create one ourself
     LCD_I2C_createChar(GRAM_BACKSLASH_INDEX, backslash_charmap);
 

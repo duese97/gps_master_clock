@@ -52,9 +52,10 @@ static esp_err_t i2c_write(uint8_t data)
     return i2c_master_transmit(dev_handle, &data, 1, max_wait_ticks);
 }
 
-static void writeNibble(uint8_t value, uint8_t mode)
+static esp_err_t writeNibble(uint8_t value, uint8_t mode)
 {
     uint8_t data = PIN_BL;
+    esp_err_t err;
 
 	// Only interested in COMMAND or DATA
     if (mode == LCD_DATA) data |= PIN_RS;
@@ -63,30 +64,37 @@ static void writeNibble(uint8_t value, uint8_t mode)
     data |= (value & 0x0F) << 4;
 
     // Enable = HIGH
-    i2c_write(data | PIN_EN);
-    ets_delay_us(1);
-
-    // Enable = LOW
-    i2c_write(data & ~PIN_EN);
-    ets_delay_us(50);
+    err = i2c_write(data | PIN_EN);
+    if (err == ESP_OK)
+    {
+       ets_delay_us(1);
+   
+       // Enable = LOW
+       err = i2c_write(data & ~PIN_EN);
+       ets_delay_us(50);
+    }
+    return err;
 }
 
-static void send(uint8_t value, uint8_t mode)
+static esp_err_t send(uint8_t value, uint8_t mode)
 {
+   esp_err_t err = ESP_OK;
    if (mode != FOUR_BITS)
    {
-      writeNibble(value >> 4, mode);
-      writeNibble(value, mode);
+      err = writeNibble(value >> 4, mode);
    }
-   else
+
+   if (err == ESP_OK)
    {
-      writeNibble(value, mode);
+      err = writeNibble(value, mode);
    }
+
+   return err;
 }
 
-static void command(uint8_t value)
+static esp_err_t command(uint8_t value)
 {
-   send(value, COMMAND);
+   return send(value, COMMAND);
 }
 
 esp_err_t LCD_I2C_begin(uint8_t cols, uint8_t lines)
@@ -180,22 +188,29 @@ esp_err_t LCD_I2C_begin(uint8_t cols, uint8_t lines)
 
 static size_t write(uint8_t value)
 {
-   send(value, LCD_DATA);
-   return 1; // assume OK
+   esp_err_t err = send(value, LCD_DATA);
+   return err == ESP_OK ? 1 : 0;
 }
 
 // Common LCD Commands
 // ---------------------------------------------------------------------------
-void LCD_I2C_print(const char *str)
+esp_err_t LCD_I2C_print(const char *str)
 {
+   esp_err_t err = ESP_OK;
    uint8_t len = strlen(str);
    if (len > _cols)
       len = _cols;
 
    for (uint8_t idx = 0; idx < len; idx++)
    {
-      send(str[idx], LCD_DATA);
+      err = send(str[idx], LCD_DATA);
+      if (err != ESP_OK)
+      {
+         break;
+      }
    }
+
+   return err;
 }
 
 void LCD_I2C_clear()

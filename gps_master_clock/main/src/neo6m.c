@@ -43,7 +43,6 @@ static void periodic_timer_callback(void* arg)
 {
     static task_msg_t msg = {.dst = TASK_TIMEKEEP, .cmd = SECOND_TRIGGER }; // prepare message
     mcu_utc++;
-
     msg.utc_time = mcu_utc;
 
     sendTaskMessageISR(&msg);
@@ -103,11 +102,10 @@ void neo6M_Task(void *parameter)
         }
         
         // interpret received data
-        TinyGPS_wrapper_crack_datetime(&gps_local_time, &last_connected_utc, &age);
-
-        if (TinyGPS_wrapper_age_invalid(age) == true)
-        { // age should have proper value
-            continue;
+        res = TinyGPS_wrapper_crack_datetime(&gps_local_time, &last_connected_utc, &age);
+        if (res != 0)
+        {
+            PRINT_LOG("Unable to crack datetime, result: %d", res);
         }
         
         if (lock_state == GPS_LOCK_UNINITIALIZED)
@@ -153,14 +151,6 @@ void neo6M_Task(void *parameter)
             {
                 total_neg_time_corrected += -clock_diff;
             }
-        }
-
-        // once every minute: print the delta unconditionally (or immediately if the sync was more than a minute ago)
-        if ((gps_local_time.tm_min != last_gps_time.tm_min) || (gps_local_time.tm_hour != last_gps_time.tm_hour))
-        {
-            print_tm_time("GPS local time: ", &gps_local_time);
-            PRINT_LOG("MCU <-> GPS delta: %ds, total corrected: pos:%ds neg:%ds",
-                clock_diff, total_pos_time_corrected, total_neg_time_corrected);
         }
 
         last_gps_time = gps_local_time; // remember last time

@@ -189,6 +189,8 @@ void app_main(void)
 
     PRINT_LOG("\nStarting application...\n");
 
+    setenv("TZ","GMT0",1);
+
     SETUP_QUEUE(NEO6M, QUEUE_LEN_GENERAL);
     SETUP_QUEUE(TIMEKEEP, QUEUE_LEN_GENERAL);
     SETUP_QUEUE(LCD, QUEUE_LEN_GENERAL);

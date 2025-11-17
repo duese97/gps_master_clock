@@ -1,10 +1,16 @@
 #include "timekeep.h"
 
+#include <string.h> // for string copy and other functions
+
 #include "custom_main.h"
 #include "bsp.h"
 
 
 #define MINUTES_PER_12H  (12*60)
+
+// Set timezone for Europe/Berlin (https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv)
+static const char* timezone_europe_berlin = "CET-1CEST,M3.5.0,M10.5.0/3";
+static const char* timezone_gmt = "GMT0";
 
 static SemaphoreHandle_t tz_mutex;
 
@@ -13,6 +19,7 @@ static int current_minutes_12o_clock = 0; // local minutes after 12 o clock posi
 // settings for the pulse waveform
 int pulse_len_ms = 100, pulse_pause_ms = 100;
 
+static time_t total_operating_seconds = 0;
 
 void take_tz_mutex(void)
 {
@@ -32,22 +39,6 @@ void give_tz_mutex(void)
     xSemaphoreGive(tz_mutex); 
 }
 
-void print_tm_time(char* additional_str, struct tm* tm)
-{
-    char * tz = getenv("TZ");
-    if (tz == NULL)
-    {
-        tz = "?";
-    }
-
-    PRINT_LOG("%s%02d:%02d:%02d %d.%d.%d DST: %d TZ: %s",
-        additional_str,
-        tm->tm_hour, tm->tm_min, tm->tm_sec,
-        tm->tm_mday, tm->tm_mon + 1, tm->tm_year + 1900,
-        tm->tm_isdst, tz
-    );
-}
-
 void timekeep_Task(void *parameter)
 {
     static task_msg_t local_time_msg = {.dst = TASK_LCD, .cmd = LOCAL_TIME };
@@ -55,6 +46,7 @@ void timekeep_Task(void *parameter)
     struct tm target_local_time;
     task_msg_t msg;
     bool locked_once = false;
+    char* timezone_env_ptr = NULL;
     gpio_set_direction(GPIO_LED, GPIO_MODE_INPUT_OUTPUT);
 
     while(1)
@@ -63,14 +55,36 @@ void timekeep_Task(void *parameter)
         {
             if(msg.cmd == SECOND_TRIGGER)
             {
+                total_operating_seconds++;
+
                 // Toggle LED to indicate activity
                 gpio_set_level(GPIO_LED, gpio_get_level(GPIO_LED) ? 0 : 1);
 
-                take_tz_mutex();
-                // In case any process outside of this application (lwip,..?) changed the timezone.
-                setenv("TZ","CET-1CEST,M3.5.0,M10.5.0/3", 1); // For details see TinyGPS_wrapper_crack_datetime()
-                target_local_time = *localtime(&msg.utc_time);
-                give_tz_mutex();
+                take_tz_mutex(); // wait until we can manipulate the timezone
+
+                /* Timezone/env handling in general is really messed up in newlib. Calling it over and over WILL
+                 * RESULT IN A MEMORY LEAK! Suggested workaround: sentenv once with sufficiently long value, and
+                 * then modify that value/change the timezone. See also:
+                 * https://github.com/espressif/esp-idf/issues/3046#issuecomment-499168477 */
+                if (timezone_env_ptr == NULL)
+                {
+                    setenv("TZ", timezone_europe_berlin, 1);
+                    timezone_env_ptr = getenv("TZ");
+                    PRINT_LOG("Initially allocating timezone: %s", timezone_env_ptr);
+                }
+                else // already allocated, can copy value
+                {
+                    strcpy(timezone_env_ptr, timezone_europe_berlin);
+                }
+                
+                target_local_time = *localtime(&msg.utc_time); // determine the local time
+
+                if (timezone_env_ptr)
+                {
+                    strcpy(timezone_env_ptr, timezone_gmt); // revert back to using GMT+0
+                }
+
+                give_tz_mutex(); // other processes can use the timezone again
 
                 local_time_msg.local_time = target_local_time;
                 sendTaskMessage(&local_time_msg);
@@ -89,11 +103,6 @@ void timekeep_Task(void *parameter)
 
                 // wrote time at least once
                 locked_once = true;
-
-                if (clock_minutes_diff == 0) // perfectly synced
-                {
-                    continue;
-                }
 
                 if (clock_minutes_diff > 0)
                 {
@@ -127,6 +136,19 @@ void timekeep_Task(void *parameter)
                     clock_minutes_diff,
                     target_local_time.tm_hour % 12, target_local_time.tm_min,
                     target_local_time.tm_hour, target_local_time.tm_min);
+
+                PRINT_LOG("Free heap: %lu, minimum free heap: %lu", esp_get_free_heap_size(), esp_get_minimum_free_heap_size());
+
+#if 0
+                        // once every minute: print the delta unconditionally (or immediately if the sync was more than a minute ago)
+        if ((gps_local_time.tm_min != last_gps_time.tm_min) || (gps_local_time.tm_hour != last_gps_time.tm_hour))
+        {
+            print_tm_time("GPS local time: ", &gps_local_time);
+            PRINT_LOG("MCU <-> GPS delta: %ds, total corrected: pos:%ds neg:%ds",
+                clock_diff, total_pos_time_corrected, total_neg_time_corrected);
+        }
+#endif
+
             }
         } // else: no new messages
 

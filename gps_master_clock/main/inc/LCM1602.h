@@ -79,7 +79,7 @@
 #define HOME_CLEAR_EXEC 2000
 
 esp_err_t LCD_I2C_begin(uint8_t cols, uint8_t lines);
-void LCD_I2C_print(const char* str);
+esp_err_t LCD_I2C_print(const char* str);
 
 void LCD_I2C_clear();
 void LCD_I2C_home();
