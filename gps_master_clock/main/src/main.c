@@ -7,6 +7,7 @@
 #include "driver/gpio.h"
 #include "driver/uart.h"
 #include "bsp.h"
+#include "esp_system.h" // misc, for reset reason
 
 // for OS methods
 #include "freertos/FreeRTOS.h"
@@ -74,10 +75,17 @@ static const QueueHandle_t *handleLookup[] =
 SemaphoreHandle_t xUartSemaphore;
 char print_buf[MAX_LOG_LEN];
 
-ram_mirror_t rm =
+// default values
+static const ram_mirror_t rm_dflt =
 {
     .pulse_len_ms = 100,
     .pulse_pause_ms = 100,
+    .magic_word = RAM_MIRROR_VALID_MAGIC,
+};
+
+ram_mirror_t rm =
+{
+    .mirror_saved_times = UINT32_MAX // to mark 'dirty' mirror after power up
 };
 
 static void init_serial_print(void)
@@ -190,9 +198,30 @@ bool sendTaskMessageISR(task_msg_t *msg)
 
 void app_main(void)
 {
+    esp_reset_reason_t reason = esp_reset_reason();
     init_serial_print();
 
-    PRINT_LOG("\nStarting application...\n");
+    PRINT_LOG("\nStarting application. Reset reason: %d\n", reason);
+
+    rm = rm_dflt;
+
+    // If the reset reason is not a power cycle, it's likely due to some SW issue
+    // Check if the RAM mirror can be used
+    if (reason != ESP_RST_UNKNOWN && reason != ESP_RST_POWERON)
+    { // there is hope to load a valid ram mirror
+        if (rm.magic_word == RAM_MIRROR_VALID_MAGIC)
+        {
+
+        }
+        else
+        {
+
+        }
+    }
+    else
+    {
+
+    }
 
     SETUP_QUEUE(NEO6M, QUEUE_LEN_GENERAL);
     SETUP_QUEUE(TIMEKEEP, QUEUE_LEN_GENERAL);

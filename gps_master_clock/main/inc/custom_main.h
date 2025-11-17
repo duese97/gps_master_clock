@@ -28,6 +28,8 @@
 
 #define ARRAY_LEN(x) (sizeof(x)/sizeof(x[0]))
 
+#define RAM_MIRROR_VALID_MAGIC 0xDEADBEEF // value to indicate the RAM mirror can be used
+
 
 //---------------------------------------------------------------------------
 // Enums
@@ -81,6 +83,9 @@ typedef struct
   uint32_t total_pos_time_corrected;
   uint32_t total_neg_time_corrected;
   uint32_t total_uptime_seconds;
+
+  uint32_t mirror_saved_times; // how many times the RAM mirror was persisted
+  uint32_t magic_word; // to easily determine if the struct contains valid data
 
   // settings for the pulse waveform
   uint16_t pulse_len_ms;

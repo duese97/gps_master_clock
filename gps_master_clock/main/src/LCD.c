@@ -11,6 +11,18 @@
 // '13:08:00 15.11.2025 DST: 0    ' = 26 chars + 4 spaces + 1 null
 #define MAX_TIME_PRINT_LEN 30
 
+enum
+{
+    STATUS_START_IDX,
+    STATUS_GPS_LOCK = STATUS_START_IDX,
+    STATUS_CORRECTION_POS,
+    STATUS_CORRECTION_NEG,
+    STATUS_TOTAL_UPTIME,
+    STATUS_CLOCK_FACE_TIME,
+    NUM_STATUS_IDX
+};
+
+
 static const char wait_animation[] = {'|', '/', '-', GRAM_BACKSLASH_INDEX};
 static uint8_t backslash_charmap[] =
 {
@@ -34,9 +46,11 @@ void LCD_Task(void *parameter)
     int curr_src_start = 0; // index where to start copying from the time buffer
     char scratch_buff[NUM_COLUMNS + 1]; // to temporarily format the time
     int wait_animation_idx = 0;
+    int status_screen_idx = STATUS_START_IDX;
 
     task_msg_t msg;
     GPS_LOCK_STATE_t lock_state_local = GPS_LOCK_UNINITIALIZED;
+    struct tm tm; // local time struct
 
     if (LCD_I2C_begin(NUM_COLUMNS, NUM_ROWS) != ESP_OK)
     { // in case no display was found just poll/consume the task messages to avoid overflowing the queue
@@ -67,23 +81,26 @@ void LCD_Task(void *parameter)
             if (msg.cmd == GPS_LOCK_STATE)
             {
                 lock_state_local = msg.lock_state;
-                LCD_I2C_setCursor(0, 1);
-                
-                if (msg.lock_state == GPS_LOCKED)
-                {
-                    LCD_I2C_print("GPS locked      ");
-                    continue; // nothing to be done, printing once is sufficient
-                }
             }
             else if (msg.cmd == LOCAL_TIME)
             {
                 // format the new time into local buffer
-                struct tm* tm = &msg.local_time;
+                tm = msg.local_time;
                 snprintf(time_print_buff, sizeof(time_print_buff), "%02u:%02u:%02u %02u.%02u.%04u DST: %1u    ",
-                    (uint8_t)tm->tm_hour, (uint8_t)tm->tm_min, (uint8_t)tm->tm_sec,
-                    (uint8_t)tm->tm_mday, (uint8_t)(tm->tm_mon + 1), (uint16_t)(tm->tm_year + 1900),
-                    (bool)tm->tm_isdst
+                    (uint8_t)tm.tm_hour, (uint8_t)tm.tm_min, (uint8_t)tm.tm_sec,
+                    (uint8_t)tm.tm_mday, (uint8_t)(tm.tm_mon + 1), (uint16_t)(tm.tm_year + 1900),
+                    (bool)tm.tm_isdst
                 );
+
+                // Change the status screen
+                if (tm.tm_sec % 5 == 0)
+                {
+                    status_screen_idx++;
+                    if (status_screen_idx >= NUM_STATUS_IDX)
+                    {
+                        status_screen_idx = STATUS_START_IDX;
+                    }
+                }
             }
         }
         
@@ -120,16 +137,76 @@ void LCD_Task(void *parameter)
             }
         }
 
-        if (lock_state_local != GPS_LOCKED)
-        {
-            LCD_I2C_setCursor(0, 1);
-            snprintf(scratch_buff, sizeof(scratch_buff), "Await GPS lock %c", wait_animation[wait_animation_idx]);
-            LCD_I2C_print(scratch_buff);
 
-            wait_animation_idx++;
-            if (wait_animation_idx >= ARRAY_LEN(wait_animation))
+        LCD_I2C_setCursor(0, 1);
+        switch(status_screen_idx)
+        {
+            case STATUS_GPS_LOCK:
             {
-                wait_animation_idx = 0;
+                if (lock_state_local == GPS_LOCKED)
+                {
+                    LCD_I2C_print("GPS locked      ");
+                }
+                else
+                {
+                    snprintf(scratch_buff, sizeof(scratch_buff), "Await GPS lock %c", wait_animation[wait_animation_idx]);
+                    LCD_I2C_print(scratch_buff);
+    
+                    wait_animation_idx++;
+                    if (wait_animation_idx >= ARRAY_LEN(wait_animation))
+                    {
+                        wait_animation_idx = 0;
+                    }
+                }
+
+                break;
+            }
+            case STATUS_CORRECTION_POS:
+            {
+                snprintf(scratch_buff, sizeof(scratch_buff), "Corr.+ %8lus", rm.total_pos_time_corrected);
+                LCD_I2C_print(scratch_buff);
+                break;
+            }
+            case STATUS_CORRECTION_NEG:
+            {
+                snprintf(scratch_buff, sizeof(scratch_buff), "Corr.- %8lus", rm.total_neg_time_corrected);
+                LCD_I2C_print(scratch_buff);
+                break;
+            }
+            case STATUS_TOTAL_UPTIME:
+            {
+                uint32_t uptime_hours = rm.total_uptime_seconds / 3600;
+                uint32_t uptime_days = uptime_hours / 24;
+                if (uptime_hours == 0)
+                {
+                    snprintf(scratch_buff, sizeof(scratch_buff), "Uptime %8lus", rm.total_uptime_seconds);
+                }
+                else if (uptime_days == 0)
+                {
+                    snprintf(scratch_buff, sizeof(scratch_buff), "Uptime %8luh", uptime_hours);
+                }
+                else
+                {
+                    snprintf(scratch_buff, sizeof(scratch_buff), "Uptime %8lud", uptime_days);
+                }
+                LCD_I2C_print(scratch_buff);
+                break;
+            }
+            case STATUS_CLOCK_FACE_TIME:
+            {
+                uint8_t hours = rm.current_minutes_12o_clock / (12 * 60);
+                uint8_t minutes = rm.current_minutes_12o_clock % 60;
+                int pos = snprintf(scratch_buff, sizeof(scratch_buff), "Clock: %02u:%02u", hours, minutes);
+                if (pos < NUM_COLUMNS)
+                {
+                    memset(scratch_buff + pos, ' ', NUM_COLUMNS-pos);
+                }
+                LCD_I2C_print(scratch_buff);
+                break;
+            }
+            default:
+            {
+                break;
             }
         }
     }
