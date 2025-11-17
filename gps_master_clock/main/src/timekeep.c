@@ -14,13 +14,6 @@ static const char* timezone_gmt = "GMT0";
 
 static SemaphoreHandle_t tz_mutex;
 
-static int current_minutes_12o_clock = 0; // local minutes after 12 o clock position
-
-// settings for the pulse waveform
-int pulse_len_ms = 100, pulse_pause_ms = 100;
-
-static time_t total_operating_seconds = 0;
-
 void take_tz_mutex(void)
 {
     if (tz_mutex == NULL) // already created?
@@ -55,7 +48,7 @@ void timekeep_Task(void *parameter)
         {
             if(msg.cmd == SECOND_TRIGGER)
             {
-                total_operating_seconds++;
+                rm.total_uptime_seconds++;
 
                 // Toggle LED to indicate activity
                 gpio_set_level(GPIO_LED, gpio_get_level(GPIO_LED) ? 0 : 1);
@@ -99,7 +92,7 @@ void timekeep_Task(void *parameter)
                 target_minutes_12o_clock += target_local_time.tm_min; // add minutes normally
 
                 // determine the current difference
-                clock_minutes_diff = target_minutes_12o_clock - current_minutes_12o_clock;
+                clock_minutes_diff = target_minutes_12o_clock - rm.current_minutes_12o_clock;
 
                 // wrote time at least once
                 locked_once = true;
@@ -132,23 +125,20 @@ void timekeep_Task(void *parameter)
                 }
 
                 PRINT_LOG("%02d:%02d -> %d minutes time difference to target -> %02d:%02d(%02d:%02d)",
-                    current_minutes_12o_clock / 60, current_minutes_12o_clock % 60,
+                    rm.current_minutes_12o_clock / 60, rm.current_minutes_12o_clock % 60,
                     clock_minutes_diff,
                     target_local_time.tm_hour % 12, target_local_time.tm_min,
                     target_local_time.tm_hour, target_local_time.tm_min);
 
-                PRINT_LOG("Free heap: %lu, minimum free heap: %lu", esp_get_free_heap_size(), esp_get_minimum_free_heap_size());
-
-#if 0
-                        // once every minute: print the delta unconditionally (or immediately if the sync was more than a minute ago)
-        if ((gps_local_time.tm_min != last_gps_time.tm_min) || (gps_local_time.tm_hour != last_gps_time.tm_hour))
-        {
-            print_tm_time("GPS local time: ", &gps_local_time);
-            PRINT_LOG("MCU <-> GPS delta: %ds, total corrected: pos:%ds neg:%ds",
-                clock_diff, total_pos_time_corrected, total_neg_time_corrected);
-        }
-#endif
-
+                // some general stats:
+                PRINT_LOG(
+                    "Free heap: %lu, minimum free heap: %lu\n"
+                    "Total corrected: pos:%lus neg:%lus\n"
+                    "Uptime: %lus = %luh = %lud",
+                    esp_get_free_heap_size(), esp_get_minimum_free_heap_size(),
+                    rm.total_pos_time_corrected, rm.total_neg_time_corrected,
+                    rm.total_uptime_seconds, rm.total_uptime_seconds / 3600, rm.total_uptime_seconds / (3600 * 24)
+                );
             }
         } // else: no new messages
 
@@ -161,17 +151,17 @@ void timekeep_Task(void *parameter)
         { // if we come here: do clock pulses
             // set GPIO(s)
             gpio_set_level(GPIO_LED, 0);
-            vTaskDelay(pulse_len_ms / portTICK_PERIOD_MS);
+            vTaskDelay(rm.pulse_len_ms / portTICK_PERIOD_MS);
             // set GPIO(s)
             gpio_set_level(GPIO_LED, 1);
-            vTaskDelay(pulse_pause_ms / portTICK_PERIOD_MS);
+            vTaskDelay(rm.pulse_pause_ms / portTICK_PERIOD_MS);
 
             // Set GPIO(s)
             gpio_set_level(GPIO_LED, 0);
-            current_minutes_12o_clock++; // one step closer to the target time
-            if (current_minutes_12o_clock >= MINUTES_PER_12H) // keep within 12 hour bounds
+            rm.current_minutes_12o_clock++; // one step closer to the target time
+            if (rm.current_minutes_12o_clock >= MINUTES_PER_12H) // keep within 12 hour bounds
             {
-                current_minutes_12o_clock = 0;
+                rm.current_minutes_12o_clock = 0;
             }
             clock_minutes_diff--;
         }

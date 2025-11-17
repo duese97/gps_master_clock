@@ -69,7 +69,6 @@ void neo6M_Task(void *parameter)
     uint32_t age;
 
     GPS_LOCK_STATE_t lock_state = GPS_LOCK_UNINITIALIZED;
-    int total_pos_time_corrected = 0, total_neg_time_corrected = 0;
 
     // setup the UART for the neo6M module
     ESP_ERROR_CHECK(uart_driver_install(NEO6M_UART, 256 /*must be at least this big(?)*/, 0, 0, NULL, intr_alloc_flags));
@@ -145,11 +144,11 @@ void neo6M_Task(void *parameter)
             // Accumulate the total drifted time into separate counters
             if (clock_diff)
             {
-                total_pos_time_corrected += clock_diff;
+                rm.total_pos_time_corrected += clock_diff;
             }
             else
             {
-                total_neg_time_corrected += -clock_diff;
+                rm.total_neg_time_corrected += -clock_diff;
             }
         }
 

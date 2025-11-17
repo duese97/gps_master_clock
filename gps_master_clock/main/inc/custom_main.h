@@ -72,6 +72,22 @@ typedef struct
   };
 } task_msg_t;
 
+// Data for EEPROM (emulation) storage, mirrored in RAM
+typedef struct
+{
+  int current_minutes_12o_clock; // local minutes after 12 o clock position
+
+  // time related stats
+  uint32_t total_pos_time_corrected;
+  uint32_t total_neg_time_corrected;
+  uint32_t total_uptime_seconds;
+
+  // settings for the pulse waveform
+  uint16_t pulse_len_ms;
+  uint16_t pulse_pause_ms;
+
+} ram_mirror_t;
+
 //---------------------------------------------------------------------------
 // Exported var/func
 //---------------------------------------------------------------------------
@@ -79,6 +95,8 @@ typedef struct
 /* exported variables */
 extern SemaphoreHandle_t xUartSemaphore;
 extern char print_buf[MAX_LOG_LEN];
+
+extern ram_mirror_t rm;
 
 /* exported functions */
 void serial_print_custom(void);

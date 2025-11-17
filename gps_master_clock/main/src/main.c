@@ -74,6 +74,11 @@ static const QueueHandle_t *handleLookup[] =
 SemaphoreHandle_t xUartSemaphore;
 char print_buf[MAX_LOG_LEN];
 
+ram_mirror_t rm =
+{
+    .pulse_len_ms = 100,
+    .pulse_pause_ms = 100,
+};
 
 static void init_serial_print(void)
 {
@@ -188,8 +193,6 @@ void app_main(void)
     init_serial_print();
 
     PRINT_LOG("\nStarting application...\n");
-
-    setenv("TZ","GMT0",1);
 
     SETUP_QUEUE(NEO6M, QUEUE_LEN_GENERAL);
     SETUP_QUEUE(TIMEKEEP, QUEUE_LEN_GENERAL);
