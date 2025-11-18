@@ -32,7 +32,7 @@
 
 #define ARRAY_LEN(x) (sizeof(x)/sizeof(x[0]))
 
-#define DISABLE_RAM_MIRROR 1 // for debugging, set to 1 to disable the RAM mirror loading mechanism
+#define DISABLE_RAM_MIRROR 0 // for debugging, set to 1 to disable the RAM mirror loading mechanism
 #define RAM_MIRROR_VALID_MAGIC 0xDEADBEEF // value to indicate the RAM mirror can be used
 
 #define NVS_NAMESPACE   "STORAGE"

@@ -219,58 +219,63 @@ esp_err_t save_nvs_data(nvs_handle_t nvs_handle)
 }
 
 
-void inital_nvs_load(bool soft_reset)
+esp_err_t inital_nvs_load(bool soft_reset)
 {
     // Initialize NVS
     esp_err_t err = nvs_flash_init();
+
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
     {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
+        err = nvs_flash_erase();
+        if (err == ESP_OK)
+        {
+            err = nvs_flash_init();
+        }
     }
-    ESP_ERROR_CHECK(err);
+    
+    if (err != ESP_OK)
+        return err;
+    
+    nvs_handle_t nvs_handle = {0};
 
     // Open NVS handle
     PRINT_LOG("Opening Non-Volatile Storage (NVS) handle...");
-
-    nvs_handle_t nvs_handle;
     err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
-    if (err != ESP_OK)
-    {
-        PRINT_LOG("Error (%s) opening NVS handle!", esp_err_to_name(err));
-        while (1)
-        {
-            vTaskDelay(1);
-        }
-    }
-
-    bool loaded_from_nvs = false;
-
-    // Check if the RAM mirror can be used
-    if (soft_reset)
-    { // there is hope to load a valid ram mirror
-        if (rm.magic_word == RAM_MIRROR_VALID_MAGIC)
-        { // back up the data, in case a future power cycle happens
-            rm.mirror_saved_times++;
-            err = save_nvs_data(nvs_handle);
-        }
-        else
-        { // try to read from NVS
-            err = load_nvs_data(nvs_handle);
-            loaded_from_nvs = true;
-        }
-    }
-    else // 'hard' reset, do not even try to load ram mirror
-    {
-        err = load_nvs_data(nvs_handle);
-        loaded_from_nvs = true;
-    }
 
     if (err == ESP_OK)
     {
-        if (loaded_from_nvs && rm.magic_word != RAM_MIRROR_VALID_MAGIC) // load worked, but somehow got garbage
+        bool loaded_from_nvs = false;
+    
+        // Check if the RAM mirror can be used
+        if (soft_reset)
+        { // there is hope to load a valid ram mirror
+            if (rm.magic_word == RAM_MIRROR_VALID_MAGIC)
+            { // back up the data, in case a future power cycle happens
+                rm.mirror_saved_times++;
+                err = save_nvs_data(nvs_handle);
+                PRINT_LOG("Trying to save valid RAM mirror to NVS...");
+            }
+            else
+            { // try to read from NVS
+                err = load_nvs_data(nvs_handle);
+                loaded_from_nvs = true;
+                PRINT_LOG("Trying to load NVS to RAM mirror...");
+            }
+        }
+        else // 'hard' reset, do not even try to load ram mirror
         {
-            err = ESP_ERR_INVALID_CRC;
+            err = load_nvs_data(nvs_handle);
+            loaded_from_nvs = true;
+            PRINT_LOG("Trying to load NVS to RAM mirror after hard reset...");
+        }
+    
+        if (err == ESP_OK)
+        {
+            if (loaded_from_nvs && rm.magic_word != RAM_MIRROR_VALID_MAGIC) // load worked, but somehow got garbage
+            {
+                err = ESP_ERR_INVALID_CRC;
+                PRINT_LOG("Unexpected magic word in loaded data: %08lX", rm.magic_word);
+            }
         }
     }
 
@@ -302,6 +307,8 @@ void inital_nvs_load(bool soft_reset)
 
     PRINT_LOG("Closing NVS");
     nvs_close(nvs_handle);
+
+    return err;
 }
 
 void app_main(void)
@@ -313,7 +320,11 @@ void app_main(void)
 #if DISABLE_RAM_MIRROR == 0
     // If the reset reason is not a power cycle, it's likely due to some SW issue
     bool soft_reset = reason != ESP_RST_UNKNOWN && reason != ESP_RST_POWERON;
-    inital_nvs_load(soft_reset);
+    esp_err_t err= inital_nvs_load(soft_reset);
+    if (err != ESP_OK)
+    {
+        PRINT_LOG("Error (%s) while handling NVS!", esp_err_to_name(err));
+    }
 #else
     rm = rm_dflt;
 #endif // DISABLE_RAM_MIRROR == 0
