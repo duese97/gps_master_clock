@@ -19,5 +19,6 @@
 #define NEO6M_RX_PIN            GPIO_NUM_16
 #define NEO6M_TX_PIN            GPIO_NUM_17
 
+#define POWER_GOOD_IO           GPIO_NUM_23
 
 #endif // _BSP_H_

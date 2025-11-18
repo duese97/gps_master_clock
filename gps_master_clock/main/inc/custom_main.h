@@ -45,7 +45,6 @@ typedef enum
 {
   TASK_LCD,
   TASK_TIMEKEEP,
-  TASK_NEO6M,
 } task_type_t;
 
 
@@ -53,9 +52,10 @@ typedef enum
 typedef enum
 {
   TASK_CMD_START = 0,
-  SECOND_TRIGGER = TASK_CMD_START,
-  GPS_LOCK_STATE,
-  LOCAL_TIME,
+  TASK_CMD_SECOND_TICK = TASK_CMD_START,
+  TASK_CMD_GPS_LOCK_STATE,
+  TASK_CMD_LOCAL_TIME,
+  TASK_CMD_SHUTDOWN,
   NUM_TASK_CMD
 } task_cmd_t;
 
@@ -118,6 +118,7 @@ bool receiveTaskMessage(task_type_t dst, uint32_t timeout, task_msg_t *msg);
 bool sendTaskMessage(task_msg_t *msg);
 bool sendTaskMessageISR(task_msg_t *msg);
 
+esp_err_t store_ram_mirror(void);
 
 /* exported macros */
 #define ESP_IDF_MILLIS() (uint32_t)((esp_timer_get_time() / 1000))

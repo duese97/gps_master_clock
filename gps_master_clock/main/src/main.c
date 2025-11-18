@@ -18,6 +18,9 @@
 #include "timekeep.h"
 #include "LCD.h"
 
+#define MIN_PWR_BAD_CNT     100     // number of times power bad has to be observed for shutdown
+#define MIN_PWR_GOOD_CNT    10000   // number of subsequent power good observations to normally resume
+
 #define SETUP_TASK_VARS(taskname, stacksize, queueElemByteCnt) \
     static StackType_t taskStack##taskname[stacksize];         \
     static TaskHandle_t taskHandle##taskname;                  \
@@ -38,7 +41,7 @@
         queueStorageArea##taskname,                          \
         &queue##taskname)
 
-        /* Messaging */
+/* Messaging */
 #define QUEUE_LEN_GENERAL 3
 #define QUEUE_ELEM_LEN sizeof(task_msg_t)
 #define QUEUE_STORAGE_GENERAL (QUEUE_LEN_GENERAL * QUEUE_ELEM_LEN)
@@ -68,7 +71,6 @@ static const QueueHandle_t *handleLookup[] =
 {
         [TASK_LCD]      = &queueHandleLCD,
         [TASK_TIMEKEEP] = &queueHandleTIMEKEEP,
-        [TASK_NEO6M]    = &queueHandleNEO6M,
 };
 
 // for logging
@@ -83,7 +85,9 @@ static const ram_mirror_t rm_dflt =
     .magic_word = RAM_MIRROR_VALID_MAGIC,
 };
 
-ram_mirror_t rm;
+// Place the ram mirror into RTC RAM. In case of a SW failure we could be able to
+// retrieve the last saved values and store them in NVS.
+RTC_DATA_ATTR ram_mirror_t rm;
 
 static void init_serial_print(void)
 {
@@ -111,6 +115,135 @@ static void init_serial_print(void)
     ESP_ERROR_CHECK(uart_driver_install(portNum, MAX_LOG_LEN /*not needed?*/, 0, 0, NULL, intr_alloc_flags));
     ESP_ERROR_CHECK(uart_param_config(portNum, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(portNum, tx_pin, rx_pin, GPIO_NUM_NC, GPIO_NUM_NC));
+}
+
+static esp_err_t load_nvs_data(nvs_handle_t nvs_handle)
+{
+    size_t value_len = sizeof(ram_mirror_t);
+    esp_err_t err = nvs_get_blob(nvs_handle, KEY_RAM_MIRROR, (void *)&rm, &value_len);
+    if (err != ESP_OK)
+    {
+        PRINT_LOG("Unable to obtain data, error: %d", err);
+    }    
+    return err;
+}
+
+static esp_err_t save_nvs_data(nvs_handle_t nvs_handle)
+{
+    size_t value_len = sizeof(ram_mirror_t);
+    rm.mirror_saved_times++;
+    esp_err_t err = nvs_set_blob(nvs_handle, KEY_RAM_MIRROR, (void *)&rm, value_len);
+    if (err == ESP_OK)
+    {
+        err = nvs_commit(nvs_handle);
+    }
+    if (err != ESP_OK)
+    {
+        PRINT_LOG("Unable to store data, error: %d", err);
+    }
+    else
+    {
+        PRINT_LOG("Performed store #%lu", rm.mirror_saved_times);
+    }
+    return err;
+}
+
+
+static esp_err_t inital_nvs_load(bool soft_reset)
+{
+    // Initialize NVS
+    esp_err_t err = nvs_flash_init();
+
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+        err = nvs_flash_erase();
+        if (err == ESP_OK)
+        {
+            err = nvs_flash_init();
+        }
+    }
+    
+    if (err != ESP_OK)
+        return err;
+    
+    nvs_handle_t nvs_handle = {0};
+
+    // Open NVS handle
+    PRINT_LOG("Opening Non-Volatile Storage (NVS) handle...");
+    err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
+
+    if (err == ESP_OK)
+    {
+        bool loaded_from_nvs = false;
+    
+        // Check if the RAM mirror can be used
+        if (soft_reset)
+        { // there is hope to load a valid ram mirror
+            if (rm.magic_word == RAM_MIRROR_VALID_MAGIC)
+            { // back up the data, in case a future power cycle happens
+                err = save_nvs_data(nvs_handle);
+                PRINT_LOG("Trying to save valid RAM mirror to NVS...");
+            }
+            else
+            { // try to read from NVS
+                err = load_nvs_data(nvs_handle);
+                loaded_from_nvs = true;
+                PRINT_LOG("Trying to load NVS to RAM mirror...");
+            }
+        }
+        else // 'hard' reset, do not even try to load ram mirror
+        {
+            err = load_nvs_data(nvs_handle);
+            loaded_from_nvs = true;
+            PRINT_LOG("Trying to load NVS to RAM mirror after hard reset...");
+        }
+    
+        if (err == ESP_OK)
+        {
+            if (loaded_from_nvs && rm.magic_word != RAM_MIRROR_VALID_MAGIC) // load worked, but somehow got garbage
+            {
+                err = ESP_ERR_INVALID_CRC;
+                PRINT_LOG("Unexpected magic word in loaded data: %08lX", rm.magic_word);
+            }
+        }
+        else if (loaded_from_nvs)
+        {
+            PRINT_LOG("Nothing to load from");
+        }
+    }
+
+    if (err != ESP_OK) // in case any of the operations failed: Try to re-init with defaults
+    {
+        PRINT_LOG("Re-initializing NVS...");
+        rm = rm_dflt;
+        err = save_nvs_data(nvs_handle);
+        if (err == ESP_OK)
+        {
+            PRINT_LOG("Set defaults done");
+        }
+        else
+        {
+            PRINT_LOG("Unable to set defaults");
+        }
+    }
+    PRINT_LOG(
+        "Using config:\n"
+        "\tcurrent_minutes_12o_clock: %d\n"
+        "\ttotal_pos_time_corrected: %lu total_neg_time_corrected: %lu\n"
+        "\tmirror_saved_times: %lu\n"
+        "\tpulse_len_ms: %u pulse_pause_ms: %u\n"
+        "\tlast_connected_utc:%lld",
+        rm.current_minutes_12o_clock,
+        rm.total_pos_time_corrected, rm.total_neg_time_corrected,
+        rm.mirror_saved_times,
+        rm.pulse_len_ms, rm.pulse_pause_ms,
+        rm.last_connected_utc
+    );
+
+    PRINT_LOG("Closing NVS");
+    nvs_close(nvs_handle);
+
+    return err;
 }
 
 //---------------------------------------------------------------------------
@@ -192,124 +325,16 @@ bool sendTaskMessageISR(task_msg_t *msg)
     return xHigherPriorityTaskWoken;
 }
 
-esp_err_t load_nvs_data(nvs_handle_t nvs_handle)
+esp_err_t store_ram_mirror(void)
 {
-    size_t value_len = sizeof(ram_mirror_t);
-    esp_err_t err = nvs_get_blob(nvs_handle, KEY_RAM_MIRROR, (void *)&rm, &value_len);
-    if (err != ESP_OK)
-    {
-        PRINT_LOG("Unable to obtain data, error: %d", err);
-    }    
-    return err;
-}
-
-esp_err_t save_nvs_data(nvs_handle_t nvs_handle)
-{
-    size_t value_len = sizeof(ram_mirror_t);
-    esp_err_t err = nvs_set_blob(nvs_handle, KEY_RAM_MIRROR, (void *)&rm, value_len);
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
     if (err == ESP_OK)
     {
-        err = nvs_commit(nvs_handle);
-    }
-    if (err != ESP_OK)
-    {
-        PRINT_LOG("Unable to store data, error: %d", err);
-    }  
-    return err;
-}
-
-
-esp_err_t inital_nvs_load(bool soft_reset)
-{
-    // Initialize NVS
-    esp_err_t err = nvs_flash_init();
-
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
-    {
-        err = nvs_flash_erase();
-        if (err == ESP_OK)
-        {
-            err = nvs_flash_init();
-        }
-    }
-    
-    if (err != ESP_OK)
-        return err;
-    
-    nvs_handle_t nvs_handle = {0};
-
-    // Open NVS handle
-    PRINT_LOG("Opening Non-Volatile Storage (NVS) handle...");
-    err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
-
-    if (err == ESP_OK)
-    {
-        bool loaded_from_nvs = false;
-    
-        // Check if the RAM mirror can be used
-        if (soft_reset)
-        { // there is hope to load a valid ram mirror
-            if (rm.magic_word == RAM_MIRROR_VALID_MAGIC)
-            { // back up the data, in case a future power cycle happens
-                rm.mirror_saved_times++;
-                err = save_nvs_data(nvs_handle);
-                PRINT_LOG("Trying to save valid RAM mirror to NVS...");
-            }
-            else
-            { // try to read from NVS
-                err = load_nvs_data(nvs_handle);
-                loaded_from_nvs = true;
-                PRINT_LOG("Trying to load NVS to RAM mirror...");
-            }
-        }
-        else // 'hard' reset, do not even try to load ram mirror
-        {
-            err = load_nvs_data(nvs_handle);
-            loaded_from_nvs = true;
-            PRINT_LOG("Trying to load NVS to RAM mirror after hard reset...");
-        }
-    
-        if (err == ESP_OK)
-        {
-            if (loaded_from_nvs && rm.magic_word != RAM_MIRROR_VALID_MAGIC) // load worked, but somehow got garbage
-            {
-                err = ESP_ERR_INVALID_CRC;
-                PRINT_LOG("Unexpected magic word in loaded data: %08lX", rm.magic_word);
-            }
-        }
-    }
-
-    if (err != ESP_OK) // in case any of the operations failed: Try to re-init with defaults
-    {
-        PRINT_LOG("Re-initializing NVS...");
-        rm = rm_dflt;
         err = save_nvs_data(nvs_handle);
-        if (err == ESP_OK)
-        {
-            PRINT_LOG("Set defaults done");
-        }
-        else
-        {
-            PRINT_LOG("Unable to set defaults");
-        }
     }
-    PRINT_LOG(
-        "Using config:\n"
-        "\tcurrent_minutes_12o_clock: %d\n"
-        "\ttotal_pos_time_corrected: %lu total_neg_time_corrected: %lu\n"
-        "\tmirror_saved_times: %lu\n"
-        "\tpulse_len_ms: %u pulse_pause_ms: %u\n"
-        "\tlast_connected_utc:%lld",
-        rm.current_minutes_12o_clock,
-        rm.total_pos_time_corrected, rm.total_neg_time_corrected,
-        rm.mirror_saved_times,
-        rm.pulse_len_ms, rm.pulse_pause_ms,
-        rm.last_connected_utc
-    );
 
-    PRINT_LOG("Closing NVS");
     nvs_close(nvs_handle);
-
     return err;
 }
 
@@ -317,6 +342,8 @@ void app_main(void)
 {
     esp_reset_reason_t reason = esp_reset_reason();
     init_serial_print();
+    gpio_set_direction(POWER_GOOD_IO, GPIO_MODE_INPUT);
+
     PRINT_LOG("\nStarting application. Reset reason: %d\n", reason);
 
 #if DISABLE_RAM_MIRROR == 0
@@ -365,8 +392,51 @@ void app_main(void)
         &taskBufferLCD
     );
 
+    int power_bad_count = 0, power_good_count = 0;
     while(1)
     {
-        vTaskDelay(1000);
+        vTaskDelay(1);
+        if (gpio_get_level(POWER_GOOD_IO) == 0) // periodically check the power good pin
+        {
+            if (power_bad_count < MIN_PWR_BAD_CNT)
+            {
+                power_good_count = 0; // reset good counter
+                power_bad_count++;
+                if (power_bad_count == MIN_PWR_BAD_CNT) // only do it once
+                {
+                    PRINT_LOG("Power bad, shutting down tasks");
+
+                    vTaskSuspend(taskHandleNEO6M); // no need for any special handling for the GPS module task, suspend it directly
+
+                    // TODO: Wait for all to finish, poll somehow
+                    
+                    // Tasks which are a bit more delicate, let them finish what they are doing right now
+                    task_msg_t msg = {.cmd = TASK_CMD_SHUTDOWN, .dst = TASK_TIMEKEEP };
+                    sendTaskMessage(&msg);
+                    msg.dst = TASK_LCD;
+                    sendTaskMessage(&msg);
+
+                    // it's now OK to save the system state
+                    store_ram_mirror();
+                }
+            }
+        }
+        else if (power_bad_count)
+        {
+            if (power_good_count < MIN_PWR_GOOD_CNT)
+            {
+                power_good_count++;
+                if (power_good_count == MIN_PWR_GOOD_CNT) // only do it once
+                {
+                    power_bad_count = 0;
+                    power_good_count = 0;
+
+                    // resume all tasks
+                    vTaskResume(taskHandleNEO6M);
+                    vTaskResume(taskHandleLCD);
+                    vTaskResume(taskHandleTIMEKEEP);
+                }
+            }
+        } // else: do nothing when no power bad detected
     }
 }

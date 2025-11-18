@@ -41,7 +41,7 @@ static volatile time_t mcu_utc;
 
 static void periodic_timer_callback(void* arg)
 {
-    static task_msg_t msg = {.dst = TASK_TIMEKEEP, .cmd = SECOND_TRIGGER }; // prepare message
+    static task_msg_t msg = {.dst = TASK_TIMEKEEP, .cmd = TASK_CMD_SECOND_TICK }; // prepare message
     mcu_utc++;
     msg.utc_time = mcu_utc;
 
@@ -60,7 +60,7 @@ static const esp_timer_create_args_t periodic_timer_args =
 void neo6M_Task(void *parameter)
 {
      // prepare message
-    static task_msg_t msg_locked = {.dst = TASK_LCD, .cmd = GPS_LOCK_STATE };
+    static task_msg_t msg_locked = {.dst = TASK_LCD, .cmd = TASK_CMD_GPS_LOCK_STATE };
 
     char buf;
     struct tm gps_local_time = {0}; 

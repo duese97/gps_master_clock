@@ -34,7 +34,7 @@ void give_tz_mutex(void)
 
 void timekeep_Task(void *parameter)
 {
-    static task_msg_t local_time_msg = {.dst = TASK_LCD, .cmd = LOCAL_TIME };
+    static task_msg_t local_time_msg = {.dst = TASK_LCD, .cmd = TASK_CMD_LOCAL_TIME };
     int clock_minutes_diff = 0; // difference to correct time
     struct tm target_local_time;
     task_msg_t msg;
@@ -46,100 +46,113 @@ void timekeep_Task(void *parameter)
     {
         if (receiveTaskMessage(TASK_TIMEKEEP, 10, &msg) == true)
         {
-            if(msg.cmd == SECOND_TRIGGER)
+            switch(msg.cmd)
             {
-                rm.total_uptime_seconds++;
-
-                // Toggle LED to indicate activity
-                gpio_set_level(GPIO_LED, gpio_get_level(GPIO_LED) ? 0 : 1);
-
-                take_tz_mutex(); // wait until we can manipulate the timezone
-
-                /* Timezone/env handling in general is really messed up in newlib. Calling it over and over WILL
-                 * RESULT IN A MEMORY LEAK! Suggested workaround: sentenv once with sufficiently long value, and
-                 * then modify that value/change the timezone. See also:
-                 * https://github.com/espressif/esp-idf/issues/3046#issuecomment-499168477 */
-                if (timezone_env_ptr == NULL)
+                case TASK_CMD_SHUTDOWN:
                 {
-                    setenv("TZ", timezone_europe_berlin, 1);
-                    timezone_env_ptr = getenv("TZ");
-                    PRINT_LOG("Initially allocating timezone: %s", timezone_env_ptr);
+                    gpio_set_level(GPIO_LED, 0); // disable LED to save power
+                    vTaskSuspend(NULL);
+                    break;
                 }
-                else // already allocated, can copy value
+                case TASK_CMD_SECOND_TICK:
                 {
-                    strcpy(timezone_env_ptr, timezone_europe_berlin);
-                }
-                
-                target_local_time = *localtime(&msg.utc_time); // determine the local time
+                    rm.total_uptime_seconds++;
 
-                if (timezone_env_ptr)
-                {
-                    strcpy(timezone_env_ptr, timezone_gmt); // revert back to using GMT+0
-                }
+                    // Toggle LED to indicate activity
+                    gpio_set_level(GPIO_LED, gpio_get_level(GPIO_LED) ? 0 : 1);
 
-                give_tz_mutex(); // other processes can use the timezone again
+                    take_tz_mutex(); // wait until we can manipulate the timezone
 
-                local_time_msg.local_time = target_local_time;
-                sendTaskMessage(&local_time_msg);
-        
-                if (target_local_time.tm_sec != 0) // only sync at full minutes
-                {
-                    continue;
-                }
-
-                int target_minutes_12o_clock = target_local_time.tm_hour % 12; // we only have a 12 hour clock
-                target_minutes_12o_clock *= 60; // 60 minutes per hour
-                target_minutes_12o_clock += target_local_time.tm_min; // add minutes normally
-
-                // determine the current difference
-                clock_minutes_diff = target_minutes_12o_clock - rm.current_minutes_12o_clock;
-
-                // wrote time at least once
-                locked_once = true;
-
-                if (clock_minutes_diff > 0)
-                {
-                    int minutes_lead = (clock_minutes_diff + MAX_LOCAL_CLOCK_LEAD_MINUTES) % MINUTES_PER_12H;
-
-                    // caution around 12'o clock position: if our local time is 00:00 or after, and the
-                    // received GPS time is before 00:00 -> large difference, where it would make sense to wait!
-                    if (minutes_lead < MAX_LOCAL_CLOCK_LEAD_MINUTES)
+                    /* Timezone/env handling in general is really messed up in newlib. Calling it over and over WILL
+                    * RESULT IN A MEMORY LEAK! Suggested workaround: sentenv once with sufficiently long value, and
+                    * then modify that value/change the timezone. See also:
+                    * https://github.com/espressif/esp-idf/issues/3046#issuecomment-499168477 */
+                    if (timezone_env_ptr == NULL)
                     {
-                        clock_minutes_diff = -minutes_lead; // this way is 'shorter'
-                        PRINT_LOG("Local time leads slightly, with the GPS time about to wrap");
+                        setenv("TZ", timezone_europe_berlin, 1);
+                        timezone_env_ptr = getenv("TZ");
+                        PRINT_LOG("Initially allocating timezone: %s", timezone_env_ptr);
+                    }
+                    else // already allocated, can copy value
+                    {
+                        strcpy(timezone_env_ptr, timezone_europe_berlin);
+                    }
+                    
+                    target_local_time = *localtime(&msg.utc_time); // determine the local time
+
+                    if (timezone_env_ptr)
+                    {
+                        strcpy(timezone_env_ptr, timezone_gmt); // revert back to using GMT+0
+                    }
+
+                    give_tz_mutex(); // other processes can use the timezone again
+
+                    local_time_msg.local_time = target_local_time;
+                    sendTaskMessage(&local_time_msg);
+            
+                    if (target_local_time.tm_sec != 0) // only sync at full minutes
+                    {
                         continue;
                     }
+
+                    int target_minutes_12o_clock = target_local_time.tm_hour % 12; // we only have a 12 hour clock
+                    target_minutes_12o_clock *= 60; // 60 minutes per hour
+                    target_minutes_12o_clock += target_local_time.tm_min; // add minutes normally
+
+                    // determine the current difference
+                    clock_minutes_diff = target_minutes_12o_clock - rm.current_minutes_12o_clock;
+                                        
+                    locked_once = true; // wrote time at least once
+
+                    if (clock_minutes_diff > 0)
+                    {
+                        int minutes_lead = (clock_minutes_diff + MAX_LOCAL_CLOCK_LEAD_MINUTES) % MINUTES_PER_12H;
+
+                        // caution around 12'o clock position: if our local time is 00:00 or after, and the
+                        // received GPS time is before 00:00 -> large difference, where it would make sense to wait!
+                        if (minutes_lead < MAX_LOCAL_CLOCK_LEAD_MINUTES)
+                        {
+                            clock_minutes_diff = -minutes_lead; // this way is 'shorter'
+                            PRINT_LOG("Local time leads slightly, with the GPS time about to wrap");
+                            continue;
+                        }
+                    }
+                    else if (clock_minutes_diff < 0) // can not set counter clockwise difference, need special handling
+                    {
+                        if (clock_minutes_diff < -MAX_LOCAL_CLOCK_LEAD_MINUTES) // if difference too large -> need to wrap around
+                        {
+                            clock_minutes_diff = MINUTES_PER_12H - clock_minutes_diff;
+                            PRINT_LOG("Local time leads too much, wrapping around");
+                        }
+                        else // difference is not too much, we can just wait
+                        {
+                            PRINT_LOG("Local time slightly leads, waiting %d minutes ...", clock_minutes_diff);
+                            continue;
+                        }
+                    }
+
+                    PRINT_LOG("%02d:%02d -> %d minutes time difference to target -> %02d:%02d(%02d:%02d)",
+                        rm.current_minutes_12o_clock / 60, rm.current_minutes_12o_clock % 60,
+                        clock_minutes_diff,
+                        target_local_time.tm_hour % 12, target_local_time.tm_min,
+                        target_local_time.tm_hour, target_local_time.tm_min);
+
+                    // some general stats:
+                    PRINT_LOG(
+                        "General:\n"
+                        "\tFree heap: %lu, minimum free heap: %lu\n"
+                        "\tTotal corrected: pos:%lus neg:%lus\n"
+                        "\tUptime: %lus = %luh = %lud",
+                        esp_get_free_heap_size(), esp_get_minimum_free_heap_size(),
+                        rm.total_pos_time_corrected, rm.total_neg_time_corrected,
+                        rm.total_uptime_seconds, rm.total_uptime_seconds / 3600, rm.total_uptime_seconds / (3600 * 24)
+                    );
+                    break;
                 }
-                else if (clock_minutes_diff < 0) // can not set counter clockwise difference, need special handling
+                default:
                 {
-                    if (clock_minutes_diff < -MAX_LOCAL_CLOCK_LEAD_MINUTES) // if difference too large -> need to wrap around
-                    {
-                        clock_minutes_diff = MINUTES_PER_12H - clock_minutes_diff;
-                        PRINT_LOG("Local time leads too much, wrapping around");
-                    }
-                    else // difference is not too much, we can just wait
-                    {
-                        PRINT_LOG("Local time slightly leads, waiting %d minutes ...", clock_minutes_diff);
-                        continue;
-                    }
+                    break;
                 }
-
-                PRINT_LOG("%02d:%02d -> %d minutes time difference to target -> %02d:%02d(%02d:%02d)",
-                    rm.current_minutes_12o_clock / 60, rm.current_minutes_12o_clock % 60,
-                    clock_minutes_diff,
-                    target_local_time.tm_hour % 12, target_local_time.tm_min,
-                    target_local_time.tm_hour, target_local_time.tm_min);
-
-                // some general stats:
-                PRINT_LOG(
-                    "General:\n"
-                    "\tFree heap: %lu, minimum free heap: %lu\n"
-                    "\tTotal corrected: pos:%lus neg:%lus\n"
-                    "\tUptime: %lus = %luh = %lud",
-                    esp_get_free_heap_size(), esp_get_minimum_free_heap_size(),
-                    rm.total_pos_time_corrected, rm.total_neg_time_corrected,
-                    rm.total_uptime_seconds, rm.total_uptime_seconds / 3600, rm.total_uptime_seconds / (3600 * 24)
-                );
             }
         } // else: no new messages
 

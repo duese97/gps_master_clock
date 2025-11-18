@@ -35,6 +35,7 @@ const i2c_device_config_t dev_conf =
 static i2c_master_bus_handle_t bus_handle;
 static i2c_master_dev_handle_t dev_handle;
 
+static uint8_t _backlight_on = true;
 static uint8_t _displayfunction;
 static uint8_t _displaycontrol; // LCD base control command LCD on/off, blink, cursor
 // all commands are "ored" to its contents.
@@ -54,7 +55,7 @@ static esp_err_t i2c_write(uint8_t data)
 
 static esp_err_t writeNibble(uint8_t value, uint8_t mode)
 {
-    uint8_t data = PIN_BL;
+    uint8_t data = _backlight_on ? PIN_BL : 0;
     esp_err_t err;
 
 	// Only interested in COMMAND or DATA
@@ -349,5 +350,10 @@ void LCD_I2C_createChar(uint8_t location, uint8_t charmap[])
       write(charmap[i]); // call the virtual write method
       ets_delay_us(40);
    }
+}
+
+void LCD_I2C_backlight(uint8_t on)
+{
+   _backlight_on = on;
 }
 

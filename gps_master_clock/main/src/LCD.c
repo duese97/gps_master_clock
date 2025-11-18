@@ -78,28 +78,45 @@ void LCD_Task(void *parameter)
     {
         if (receiveTaskMessage(TASK_LCD, 500, &msg) == true)
         {
-            if (msg.cmd == GPS_LOCK_STATE)
+            switch(msg.cmd)
             {
-                lock_state_local = msg.lock_state;
-            }
-            else if (msg.cmd == LOCAL_TIME)
-            {
-                // format the new time into local buffer
-                tm = msg.local_time;
-                snprintf(time_print_buff, sizeof(time_print_buff), "%02u:%02u:%02u %02u.%02u.%04u DST: %1u    ",
-                    (uint8_t)tm.tm_hour, (uint8_t)tm.tm_min, (uint8_t)tm.tm_sec,
-                    (uint8_t)tm.tm_mday, (uint8_t)(tm.tm_mon + 1), (uint16_t)(tm.tm_year + 1900),
-                    (bool)tm.tm_isdst
-                );
-
-                // Change the status screen
-                if (tm.tm_sec % 5 == 0)
+                case TASK_CMD_GPS_LOCK_STATE:
                 {
-                    status_screen_idx++;
-                    if (status_screen_idx >= NUM_STATUS_IDX)
+                    lock_state_local = msg.lock_state;
+                    break;
+                }
+                case TASK_CMD_LOCAL_TIME:
+                {
+                    // format the new time into local buffer
+                    tm = msg.local_time;
+                    snprintf(time_print_buff, sizeof(time_print_buff), "%02u:%02u:%02u %02u.%02u.%04u DST: %1u    ",
+                        (uint8_t)tm.tm_hour, (uint8_t)tm.tm_min, (uint8_t)tm.tm_sec,
+                        (uint8_t)tm.tm_mday, (uint8_t)(tm.tm_mon + 1), (uint16_t)(tm.tm_year + 1900),
+                        (bool)tm.tm_isdst
+                    );
+
+                    // Change the status screen
+                    if (tm.tm_sec % 5 == 0)
                     {
-                        status_screen_idx = STATUS_START_IDX;
+                        status_screen_idx++;
+                        if (status_screen_idx >= NUM_STATUS_IDX)
+                        {
+                            status_screen_idx = STATUS_START_IDX;
+                        }
                     }
+                    break;
+                }
+                case TASK_CMD_SHUTDOWN:
+                {
+                    LCD_I2C_backlight(false); // disable backlight to save power
+                    LCD_I2C_clear(); // dummy command for backlight to take effect
+                    vTaskSuspend(NULL);
+                    LCD_I2C_backlight(true); // enable again
+                    break;
+                }
+                default:
+                {
+                    break;
                 }
             }
         }
