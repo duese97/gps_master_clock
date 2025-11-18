@@ -1,0 +1,3 @@
+[submodule "gps_master_clock/main/TinyGPS"]
+	path = gps_master_clock/main/TinyGPS
+	url = https://github.com/duese97/TinyGPS
