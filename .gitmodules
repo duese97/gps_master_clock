@@ -1,4 +1,0 @@
-[submodule "TinyGPS"]
-	path = gps_master_clock/main/TinyGPS
-	url = https://github.com/mikalhart/TinyGPS.git
-	branch = master
