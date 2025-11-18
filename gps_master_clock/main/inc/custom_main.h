@@ -11,6 +11,10 @@
 
 #include <time.h> // for time_t
 
+// EEPROM emulation
+#include "nvs.h"
+#include "nvs_flash.h"
+
 //---------------------------------------------------------------------------
 // Defines
 //---------------------------------------------------------------------------
@@ -28,8 +32,11 @@
 
 #define ARRAY_LEN(x) (sizeof(x)/sizeof(x[0]))
 
+#define DISABLE_RAM_MIRROR 1 // for debugging, set to 1 to disable the RAM mirror loading mechanism
 #define RAM_MIRROR_VALID_MAGIC 0xDEADBEEF // value to indicate the RAM mirror can be used
 
+#define NVS_NAMESPACE   "STORAGE"
+#define KEY_RAM_MIRROR  "RM"
 
 //---------------------------------------------------------------------------
 // Enums
@@ -77,6 +84,8 @@ typedef struct
 // Data for EEPROM (emulation) storage, mirrored in RAM
 typedef struct
 {
+  time_t last_connected_utc;
+  
   int current_minutes_12o_clock; // local minutes after 12 o clock position
 
   // time related stats

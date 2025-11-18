@@ -83,10 +83,7 @@ static const ram_mirror_t rm_dflt =
     .magic_word = RAM_MIRROR_VALID_MAGIC,
 };
 
-ram_mirror_t rm =
-{
-    .mirror_saved_times = UINT32_MAX // to mark 'dirty' mirror after power up
-};
+ram_mirror_t rm;
 
 static void init_serial_print(void)
 {
@@ -195,33 +192,131 @@ bool sendTaskMessageISR(task_msg_t *msg)
     return xHigherPriorityTaskWoken;
 }
 
+esp_err_t load_nvs_data(nvs_handle_t nvs_handle)
+{
+    size_t value_len = sizeof(ram_mirror_t);
+    esp_err_t err = nvs_get_blob(nvs_handle, KEY_RAM_MIRROR, (void *)&rm, &value_len);
+    if (err != ESP_OK)
+    {
+        PRINT_LOG("Unable to obtain data, error: %d", err);
+    }    
+    return err;
+}
+
+esp_err_t save_nvs_data(nvs_handle_t nvs_handle)
+{
+    size_t value_len = sizeof(ram_mirror_t);
+    esp_err_t err = nvs_set_blob(nvs_handle, KEY_RAM_MIRROR, (void *)&rm, value_len);
+    if (err == ESP_OK)
+    {
+        err = nvs_commit(nvs_handle);
+    }
+    if (err != ESP_OK)
+    {
+        PRINT_LOG("Unable to store data, error: %d", err);
+    }  
+    return err;
+}
+
+
+void inital_nvs_load(bool soft_reset)
+{
+    // Initialize NVS
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+
+    // Open NVS handle
+    PRINT_LOG("Opening Non-Volatile Storage (NVS) handle...");
+
+    nvs_handle_t nvs_handle;
+    err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK)
+    {
+        PRINT_LOG("Error (%s) opening NVS handle!", esp_err_to_name(err));
+        while (1)
+        {
+            vTaskDelay(1);
+        }
+    }
+
+    bool loaded_from_nvs = false;
+
+    // Check if the RAM mirror can be used
+    if (soft_reset)
+    { // there is hope to load a valid ram mirror
+        if (rm.magic_word == RAM_MIRROR_VALID_MAGIC)
+        { // back up the data, in case a future power cycle happens
+            rm.mirror_saved_times++;
+            err = save_nvs_data(nvs_handle);
+        }
+        else
+        { // try to read from NVS
+            err = load_nvs_data(nvs_handle);
+            loaded_from_nvs = true;
+        }
+    }
+    else // 'hard' reset, do not even try to load ram mirror
+    {
+        err = load_nvs_data(nvs_handle);
+        loaded_from_nvs = true;
+    }
+
+    if (err == ESP_OK)
+    {
+        if (loaded_from_nvs && rm.magic_word != RAM_MIRROR_VALID_MAGIC) // load worked, but somehow got garbage
+        {
+            err = ESP_ERR_INVALID_CRC;
+        }
+    }
+
+    if (err != ESP_OK) // in case any of the operations failed: Try to re-init with defaults
+    {
+        PRINT_LOG("Re-initializing NVS...");
+        rm = rm_dflt;
+        err = save_nvs_data(nvs_handle);
+        if (err == ESP_OK)
+        {
+            PRINT_LOG("Set defaults done");
+        }
+        else
+        {
+            PRINT_LOG("Unable to set defaults");
+        }
+    }
+    PRINT_LOG(
+        "Using config:\n"
+        "current_minutes_12o_clock: %d\n"
+        "total_pos_time_corrected: %lu total_neg_time_corrected: %lu\n"
+        "mirror_saved_times: %lu\n"
+        "pulse_len_ms: %u pulse_pause_ms: %u",
+        rm.current_minutes_12o_clock,
+        rm.total_pos_time_corrected, rm.total_neg_time_corrected,
+        rm.mirror_saved_times,
+        rm.pulse_len_ms, rm.pulse_pause_ms
+    );
+
+    PRINT_LOG("Closing NVS");
+    nvs_close(nvs_handle);
+}
 
 void app_main(void)
 {
     esp_reset_reason_t reason = esp_reset_reason();
     init_serial_print();
-
     PRINT_LOG("\nStarting application. Reset reason: %d\n", reason);
 
-    rm = rm_dflt;
-
+#if DISABLE_RAM_MIRROR == 0
     // If the reset reason is not a power cycle, it's likely due to some SW issue
-    // Check if the RAM mirror can be used
-    if (reason != ESP_RST_UNKNOWN && reason != ESP_RST_POWERON)
-    { // there is hope to load a valid ram mirror
-        if (rm.magic_word == RAM_MIRROR_VALID_MAGIC)
-        {
-
-        }
-        else
-        {
-
-        }
-    }
-    else
-    {
-
-    }
+    bool soft_reset = reason != ESP_RST_UNKNOWN && reason != ESP_RST_POWERON;
+    inital_nvs_load(soft_reset);
+#else
+    rm = rm_dflt;
+#endif // DISABLE_RAM_MIRROR == 0
 
     SETUP_QUEUE(NEO6M, QUEUE_LEN_GENERAL);
     SETUP_QUEUE(TIMEKEEP, QUEUE_LEN_GENERAL);

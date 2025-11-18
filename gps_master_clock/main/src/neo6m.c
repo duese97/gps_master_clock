@@ -63,9 +63,7 @@ void neo6M_Task(void *parameter)
     static task_msg_t msg_locked = {.dst = TASK_LCD, .cmd = GPS_LOCK_STATE };
 
     char buf;
-    struct tm last_gps_time = {0};
     struct tm gps_local_time = {0}; 
-    time_t last_connected_utc = 0;
     uint32_t age;
 
     GPS_LOCK_STATE_t lock_state = GPS_LOCK_UNINITIALIZED;
@@ -84,10 +82,9 @@ void neo6M_Task(void *parameter)
         int res = uart_read_bytes(NEO6M_UART, &buf, sizeof(buf), 2000); // normally data should frequently come in
         if (res <= 0) 
         { // timed out or any other error
-            PRINT_LOG("No GPS signal");
-
             if (lock_state != GPS_LOCK_LOST) // only need to set state / send message once
             {
+                PRINT_LOG("No GPS signal");
                 lock_state = GPS_LOCK_LOST;
                 msg_locked.lock_state = GPS_LOCK_LOST;
                 sendTaskMessage(&msg_locked);
@@ -101,17 +98,16 @@ void neo6M_Task(void *parameter)
         }
         
         // interpret received data
-        res = TinyGPS_wrapper_crack_datetime(&gps_local_time, &last_connected_utc, &age);
+        res = TinyGPS_wrapper_crack_datetime(&gps_local_time, &rm.last_connected_utc, &age);
         if (res != 0)
         {
             PRINT_LOG("Unable to crack datetime, result: %d", res);
+            continue;
         }
         
         if (lock_state == GPS_LOCK_UNINITIALIZED)
         {
-            last_gps_time = gps_local_time;
-
-            mcu_utc = last_connected_utc;
+            mcu_utc = rm.last_connected_utc;
 
             // start cyclic timer
             ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US));
@@ -132,11 +128,11 @@ void neo6M_Task(void *parameter)
         }
 
         // determine time difference between local clock and received time
-        int clock_diff = difftime(mcu_utc, last_connected_utc);
+        int clock_diff = difftime(mcu_utc, rm.last_connected_utc);
         if (abs(clock_diff) > MAX_ALLOWED_LOCAL_CLOCK_DRIFT_SECONDS)
         { // too great, adjust
             ESP_ERROR_CHECK(esp_timer_stop(periodic_timer)); // halt timer, it does read-modify-write of the variable (not atomic)!
-            mcu_utc = last_connected_utc; // set new UTC timestamp
+            mcu_utc = rm.last_connected_utc; // set new UTC timestamp
             ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US)); // restart timer
 
             PRINT_LOG("Local clock drifted by: %d, halting and re-adjusting", clock_diff);
@@ -151,7 +147,5 @@ void neo6M_Task(void *parameter)
                 rm.total_neg_time_corrected += -clock_diff;
             }
         }
-
-        last_gps_time = gps_local_time; // remember last time
     }
 }

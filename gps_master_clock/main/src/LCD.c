@@ -194,7 +194,7 @@ void LCD_Task(void *parameter)
             }
             case STATUS_CLOCK_FACE_TIME:
             {
-                uint8_t hours = rm.current_minutes_12o_clock / (12 * 60);
+                uint8_t hours = rm.current_minutes_12o_clock / 60;
                 uint8_t minutes = rm.current_minutes_12o_clock % 60;
                 int pos = snprintf(scratch_buff, sizeof(scratch_buff), "Clock: %02u:%02u", hours, minutes);
                 if (pos < NUM_COLUMNS)
