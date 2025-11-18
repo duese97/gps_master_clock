@@ -26,6 +26,18 @@ int TinyGPS_wrapper_crack_datetime(struct tm* local, time_t* utc, uint32_t* age)
         return -1;
     }
 
+    // general sanity checks
+    if (month > 12 || day > 31 || hour > 23 || min > 59 || sec > 59)
+    {
+        return -1;
+    }
+
+    // could not receive time older than project build date
+    if (year < 2025)
+    {
+        return -1;
+    }
+
     // Prepare time struct for mktime
     tim.tm_year = year - 1900;
     tim.tm_mon = month - 1;

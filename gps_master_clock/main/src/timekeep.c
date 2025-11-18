@@ -132,9 +132,10 @@ void timekeep_Task(void *parameter)
 
                 // some general stats:
                 PRINT_LOG(
-                    "Free heap: %lu, minimum free heap: %lu\n"
-                    "Total corrected: pos:%lus neg:%lus\n"
-                    "Uptime: %lus = %luh = %lud",
+                    "General:\n"
+                    "\tFree heap: %lu, minimum free heap: %lu\n"
+                    "\tTotal corrected: pos:%lus neg:%lus\n"
+                    "\tUptime: %lus = %luh = %lud",
                     esp_get_free_heap_size(), esp_get_minimum_free_heap_size(),
                     rm.total_pos_time_corrected, rm.total_neg_time_corrected,
                     rm.total_uptime_seconds, rm.total_uptime_seconds / 3600, rm.total_uptime_seconds / (3600 * 24)

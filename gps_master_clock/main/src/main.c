@@ -295,14 +295,16 @@ esp_err_t inital_nvs_load(bool soft_reset)
     }
     PRINT_LOG(
         "Using config:\n"
-        "current_minutes_12o_clock: %d\n"
-        "total_pos_time_corrected: %lu total_neg_time_corrected: %lu\n"
-        "mirror_saved_times: %lu\n"
-        "pulse_len_ms: %u pulse_pause_ms: %u",
+        "\tcurrent_minutes_12o_clock: %d\n"
+        "\ttotal_pos_time_corrected: %lu total_neg_time_corrected: %lu\n"
+        "\tmirror_saved_times: %lu\n"
+        "\tpulse_len_ms: %u pulse_pause_ms: %u\n"
+        "\tlast_connected_utc:%lld",
         rm.current_minutes_12o_clock,
         rm.total_pos_time_corrected, rm.total_neg_time_corrected,
         rm.mirror_saved_times,
-        rm.pulse_len_ms, rm.pulse_pause_ms
+        rm.pulse_len_ms, rm.pulse_pause_ms,
+        rm.last_connected_utc
     );
 
     PRINT_LOG("Closing NVS");

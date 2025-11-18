@@ -112,12 +112,7 @@ void neo6M_Task(void *parameter)
             // start cyclic timer
             ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US));
 
-            PRINT_LOG("Inital lock");
-
-            lock_state = GPS_LOCKED;
-            msg_locked.lock_state = GPS_LOCKED;
-            sendTaskMessage(&msg_locked);
-            continue;
+            PRINT_LOG("Inital lock, age: %lu mcu utc: %lld last connected utc: %lld", age, mcu_utc, rm.last_connected_utc);
         }
 
         if (lock_state != GPS_LOCKED) // avoid sending same message over and over, if lock did not change
@@ -128,14 +123,14 @@ void neo6M_Task(void *parameter)
         }
 
         // determine time difference between local clock and received time
-        int clock_diff = difftime(mcu_utc, rm.last_connected_utc);
-        if (abs(clock_diff) > MAX_ALLOWED_LOCAL_CLOCK_DRIFT_SECONDS)
+        double clock_diff = difftime(mcu_utc, rm.last_connected_utc);
+        if (fabs(clock_diff) > MAX_ALLOWED_LOCAL_CLOCK_DRIFT_SECONDS)
         { // too great, adjust
             ESP_ERROR_CHECK(esp_timer_stop(periodic_timer)); // halt timer, it does read-modify-write of the variable (not atomic)!
             mcu_utc = rm.last_connected_utc; // set new UTC timestamp
             ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US)); // restart timer
 
-            PRINT_LOG("Local clock drifted by: %d, halting and re-adjusting", clock_diff);
+            PRINT_LOG("Local clock drifted by: %lf, halting and re-adjusting to %lld", clock_diff, mcu_utc);
 
             // Accumulate the total drifted time into separate counters
             if (clock_diff)
