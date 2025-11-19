@@ -42,10 +42,12 @@ void timekeep_Task(void *parameter)
 {
     static task_msg_t local_time_msg = {.dst = TASK_LCD, .cmd = TASK_CMD_LOCAL_TIME };
     int clock_minutes_diff = 0; // difference to correct time
-    struct tm target_local_time;
-    task_msg_t msg;
-    bool locked_once = false;
-    char* timezone_env_ptr = NULL;
+    struct tm target_local_time; // from conversion from received UTC to localtime
+    task_msg_t msg; // scratch buffer for receiving task messages
+    bool locked_once = false; // to check if at least once a valid time was set
+    char* timezone_env_ptr = NULL; // points to heap, where timezone string will be buffered
+    bool commissioning = false;
+
     gpio_set_direction(GPIO_LED, GPIO_MODE_INPUT_OUTPUT);
 
     while(1)
@@ -60,9 +62,20 @@ void timekeep_Task(void *parameter)
                     vTaskSuspend(NULL);
                     break;
                 }
+                case TASK_CMD_START_COMMISSIONING:
+                {
+                    commissioning = true;
+                    clock_minutes_diff = 0;
+                    break;
+                }
                 case TASK_CMD_SECOND_TICK:
                 {
                     rm.total_uptime_seconds++;
+
+                    if (commissioning == true) // if commissioning right now -> skip all of the handling
+                    {
+                        continue;
+                    }
 
                     // Toggle LED to indicate activity
                     gpio_set_level(GPIO_LED, gpio_get_level(GPIO_LED) ? 0 : 1);
