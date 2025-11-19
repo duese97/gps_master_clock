@@ -21,4 +21,7 @@
 
 #define POWER_GOOD_IO           GPIO_NUM_23
 
+#define USR_BUTTON_IO           GPIO_NUM_34
+#define USR_BUTTON_PRESS_LVL    0
+
 #endif // _BSP_H_

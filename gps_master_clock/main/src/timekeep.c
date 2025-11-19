@@ -44,7 +44,6 @@ void timekeep_Task(void *parameter)
     int clock_minutes_diff = 0; // difference to correct time
     struct tm target_local_time; // from conversion from received UTC to localtime
     task_msg_t msg; // scratch buffer for receiving task messages
-    bool locked_once = false; // to check if at least once a valid time was set
     char* timezone_env_ptr = NULL; // points to heap, where timezone string will be buffered
     bool commissioning = false;
 
@@ -64,8 +63,15 @@ void timekeep_Task(void *parameter)
                 }
                 case TASK_CMD_START_COMMISSIONING:
                 {
-                    commissioning = true;
+
                     clock_minutes_diff = 0;
+                    break;
+                }
+                case TASK_CMD_TRIGGER_TICK:
+                {
+                    // set commissioning flag and force one tick
+                    commissioning = true;
+                    clock_minutes_diff = 1;
                     break;
                 }
                 case TASK_CMD_SECOND_TICK:
@@ -120,8 +126,6 @@ void timekeep_Task(void *parameter)
 
                     // determine the current difference
                     clock_minutes_diff = target_minutes_12o_clock - rm.current_minutes_12o_clock;
-                                        
-                    locked_once = true; // wrote time at least once
 
                     if (clock_minutes_diff > 0)
                     {
@@ -198,11 +202,6 @@ void timekeep_Task(void *parameter)
                 }
             }
         } // else: no new messages
-
-        if (locked_once == false)
-        {
-            continue;
-        }
 
         if (clock_minutes_diff > 0) // no backwards pulses possible
         { // if we come here: do clock pulses

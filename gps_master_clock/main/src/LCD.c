@@ -2,6 +2,7 @@
 #include "LCM1602.h"
 
 #include "custom_main.h"
+#include "bsp.h"
 
 #define NUM_COLUMNS 16
 #define NUM_ROWS 2
@@ -10,6 +11,9 @@
 
 // '13:08:00 15.11.2025 DST: 0    ' = 26 chars + 4 spaces + 1 null
 #define MAX_TIME_PRINT_LEN 30
+
+#define SHORT_PRESS_DURATION_MS 40
+#define LONG_PRESS_DURATION_MS 500
 
 enum
 {
@@ -20,6 +24,14 @@ enum
     STATUS_TOTAL_UPTIME,
     STATUS_CLOCK_FACE_TIME,
     NUM_STATUS_IDX
+};
+
+enum
+{
+    BTN_NO_PRESS,
+    BTN_SHORT_PRESS,
+    BTN_LONG_PRESS_START,
+    BTN_LONG_PRESS_RELEASED,
 };
 
 
@@ -38,6 +50,51 @@ static uint8_t backslash_charmap[] =
     0b00000000
 };
 
+void Btn_Task(void *parameter)
+{
+    uint8_t btn_state = BTN_NO_PRESS;
+    uint32_t press_start = 0, last_press = 0;
+
+    while(1)
+    {
+        // check if first level change detected
+        if (press_start == 0 && gpio_get_level(USR_BUTTON_IO) == USR_BUTTON_PRESS_LVL)
+        {
+            press_start = ESP_IDF_MILLIS();
+            last_press = press_start;
+        }   
+        else if (press_start) // button press started?
+        {
+            uint32_t diff = ESP_IDF_MILLIS() - press_start;
+            if (gpio_get_level(USR_BUTTON_IO) != USR_BUTTON_PRESS_LVL) // released again?
+            {
+                press_start = 0;
+                if (diff >= LONG_PRESS_DURATION_MS)
+                {
+                    PRINT_LOG("Long Press released");
+                    btn_state = BTN_LONG_PRESS_RELEASED;
+                }
+                else if (diff >= SHORT_PRESS_DURATION_MS)
+                {
+                    PRINT_LOG("Short Press");
+                    btn_state = BTN_SHORT_PRESS;
+                }
+                else
+                {
+                    btn_state = BTN_NO_PRESS;
+                }
+            }
+            else if (diff >= LONG_PRESS_DURATION_MS) // still pressed
+            {
+                btn_state = BTN_LONG_PRESS_START;
+            }
+            else
+            {
+                btn_state = BTN_NO_PRESS;
+            }
+        }
+    }
+}
 
 void LCD_Task(void *parameter)
 {
