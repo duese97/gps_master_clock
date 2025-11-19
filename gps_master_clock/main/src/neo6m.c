@@ -133,7 +133,7 @@ void neo6M_Task(void *parameter)
             PRINT_LOG("Local clock drifted by: %lf, halting and re-adjusting to %lld", clock_diff, mcu_utc);
 
             // Accumulate the total drifted time into separate counters
-            if (clock_diff)
+            if (clock_diff > 0)
             {
                 rm.total_pos_time_corrected += clock_diff;
             }

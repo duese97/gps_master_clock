@@ -20,7 +20,7 @@
 //---------------------------------------------------------------------------
 
 #define MAX_LOG_WAIT_MS 10              // time to wait for UART to become available
-#define MAX_LOG_LEN 256                 // maximum log message length, includes timestamp + func name
+#define MAX_LOG_LEN 512                 // maximum log message length, includes timestamp + func name
 
 // The maximum time in minutes the local clock can lead in minutes, before a wraparound must happen
 #define MAX_LOCAL_CLOCK_LEAD_MINUTES  5
@@ -32,7 +32,7 @@
 
 #define ARRAY_LEN(x) (sizeof(x)/sizeof(x[0]))
 
-#define DISABLE_RAM_MIRROR 0 // for debugging, set to 1 to disable the RAM mirror loading mechanism
+#define SET_NVS_DEFAULTS 1 // for debugging, set to 1 and flash to restore NVS defaults
 #define RAM_MIRROR_VALID_MAGIC 0xDEADBEEF // value to indicate the RAM mirror can be used
 
 #define NVS_NAMESPACE   "STORAGE"

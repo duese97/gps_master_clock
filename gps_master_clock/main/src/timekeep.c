@@ -2,6 +2,9 @@
 
 #include <string.h> // for string copy and other functions
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"  // for vTaskGetRunTimeStats
+
 #include "custom_main.h"
 #include "bsp.h"
 
@@ -13,6 +16,9 @@ static const char* timezone_europe_berlin = "CET-1CEST,M3.5.0,M10.5.0/3";
 static const char* timezone_gmt = "GMT0";
 
 static SemaphoreHandle_t tz_mutex;
+
+static char* runtime_stat_buffer_ptr; // ~40B per task, 
+static uint8_t last_num_tasks = 0;
 
 void take_tz_mutex(void)
 {
@@ -50,7 +56,7 @@ void timekeep_Task(void *parameter)
             {
                 case TASK_CMD_SHUTDOWN:
                 {
-                    gpio_set_level(GPIO_LED, 0); // disable LED to save power
+                    gpio_set_level(GPIO_LED, 0); // disable LED to save a bit power
                     vTaskSuspend(NULL);
                     break;
                 }
@@ -147,6 +153,30 @@ void timekeep_Task(void *parameter)
                         rm.total_pos_time_corrected, rm.total_neg_time_corrected,
                         rm.total_uptime_seconds, rm.total_uptime_seconds / 3600, rm.total_uptime_seconds / (3600 * 24)
                     );
+                    uint8_t curr_num_tasks = uxTaskGetNumberOfTasks();
+                    if (last_num_tasks != curr_num_tasks)
+                    { // number of tasks changed, re-allocate
+                        if (runtime_stat_buffer_ptr)
+                        { // free old buffer
+                            vPortFree(runtime_stat_buffer_ptr);
+                            runtime_stat_buffer_ptr = NULL;
+                        }
+
+                        PRINT_LOG("Re-allocating, task num changed from %u to %u", last_num_tasks, curr_num_tasks);
+
+                        // see :https://www.freertos.org/Documentation/02-Kernel/04-API-references/03-Task-utilities/00-Task-utilities#vtaskgetruntimestats
+                        // around 40B per task -> double it for safety
+                        runtime_stat_buffer_ptr = pvPortMalloc(80 * curr_num_tasks);
+                        if (runtime_stat_buffer_ptr)
+                        { // if allocation worked: remember new amount of tasks
+                            last_num_tasks = curr_num_tasks;
+                        }
+                    }
+                    if (runtime_stat_buffer_ptr != NULL) // make sure allocation worked
+                    {
+                        vTaskGetRunTimeStats(runtime_stat_buffer_ptr);
+                        PRINT_LOG("Runtime stats:\n%s", runtime_stat_buffer_ptr);
+                    }
                     break;
                 }
                 default:

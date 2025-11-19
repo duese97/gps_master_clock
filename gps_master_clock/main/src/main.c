@@ -117,6 +117,7 @@ static void init_serial_print(void)
     ESP_ERROR_CHECK(uart_set_pin(portNum, tx_pin, rx_pin, GPIO_NUM_NC, GPIO_NUM_NC));
 }
 
+#if SET_NVS_DEFAULTS == 0
 static esp_err_t load_nvs_data(nvs_handle_t nvs_handle)
 {
     size_t value_len = sizeof(ram_mirror_t);
@@ -127,6 +128,7 @@ static esp_err_t load_nvs_data(nvs_handle_t nvs_handle)
     }    
     return err;
 }
+#endif // SET_NVS_DEFAULTS == 0
 
 static esp_err_t save_nvs_data(nvs_handle_t nvs_handle)
 {
@@ -172,6 +174,7 @@ static esp_err_t inital_nvs_load(bool soft_reset)
     PRINT_LOG("Opening Non-Volatile Storage (NVS) handle...");
     err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
 
+#if SET_NVS_DEFAULTS == 0
     if (err == ESP_OK)
     {
         bool loaded_from_nvs = false;
@@ -211,8 +214,9 @@ static esp_err_t inital_nvs_load(bool soft_reset)
             PRINT_LOG("Nothing to load from");
         }
     }
-
+    
     if (err != ESP_OK) // in case any of the operations failed: Try to re-init with defaults
+#endif // SET_NVS_DEFAULTS == 0
     {
         PRINT_LOG("Re-initializing NVS...");
         rm = rm_dflt;
@@ -244,6 +248,36 @@ static esp_err_t inital_nvs_load(bool soft_reset)
     nvs_close(nvs_handle);
 
     return err;
+}
+
+static void wait_shutdown(void)
+{
+    const TaskHandle_t *checkHandles[] =
+    {
+        &taskHandleLCD,
+        &taskHandleTIMEKEEP,
+    };
+    uint8_t num_handles =sizeof(checkHandles) / sizeof(checkHandles[0]);
+
+    bool done = false;
+    TaskStatus_t tmpStat;
+
+    while (!done)
+    {
+        done = true;
+        for (uint8_t idx = 0; idx < num_handles; idx++)
+        {
+            const TaskHandle_t *curr_handle = checkHandles[idx];
+
+            if (curr_handle == NULL) // no need to check if handle not initialized
+                continue;
+
+            vTaskGetInfo(*curr_handle, &tmpStat, pdFALSE /* skip stack check*/, eInvalid /*get task state */);
+            if (tmpStat.eCurrentState != eSuspended) // only need to delay if the task is actually not yet suspended
+                vTaskDelay(1);
+            done &= tmpStat.eCurrentState == eSuspended;
+        }
+    }
 }
 
 //---------------------------------------------------------------------------
@@ -346,7 +380,6 @@ void app_main(void)
 
     PRINT_LOG("\nStarting application. Reset reason: %d\n", reason);
 
-#if DISABLE_RAM_MIRROR == 0
     // If the reset reason is not a power cycle, it's likely due to some SW issue
     bool soft_reset = reason != ESP_RST_UNKNOWN && reason != ESP_RST_POWERON;
     esp_err_t err= inital_nvs_load(soft_reset);
@@ -354,9 +387,6 @@ void app_main(void)
     {
         PRINT_LOG("Error (%s) while handling NVS!", esp_err_to_name(err));
     }
-#else
-    rm = rm_dflt;
-#endif // DISABLE_RAM_MIRROR == 0
 
     SETUP_QUEUE(NEO6M, QUEUE_LEN_GENERAL);
     SETUP_QUEUE(TIMEKEEP, QUEUE_LEN_GENERAL);
@@ -405,16 +435,15 @@ void app_main(void)
                 if (power_bad_count == MIN_PWR_BAD_CNT) // only do it once
                 {
                     PRINT_LOG("Power bad, shutting down tasks");
-
-                    vTaskSuspend(taskHandleNEO6M); // no need for any special handling for the GPS module task, suspend it directly
-
-                    // TODO: Wait for all to finish, poll somehow
                     
                     // Tasks which are a bit more delicate, let them finish what they are doing right now
                     task_msg_t msg = {.cmd = TASK_CMD_SHUTDOWN, .dst = TASK_TIMEKEEP };
                     sendTaskMessage(&msg);
                     msg.dst = TASK_LCD;
                     sendTaskMessage(&msg);
+
+                    wait_shutdown();
+                    PRINT_LOG("Shutdown complete, storing..");
 
                     // it's now OK to save the system state
                     store_ram_mirror();
@@ -428,11 +457,12 @@ void app_main(void)
                 power_good_count++;
                 if (power_good_count == MIN_PWR_GOOD_CNT) // only do it once
                 {
+                    PRINT_LOG("Power recovered, resuming tasks");
+
                     power_bad_count = 0;
                     power_good_count = 0;
 
                     // resume all tasks
-                    vTaskResume(taskHandleNEO6M);
                     vTaskResume(taskHandleLCD);
                     vTaskResume(taskHandleTIMEKEEP);
                 }
