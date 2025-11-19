@@ -12,6 +12,7 @@
 // for OS methods
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
 
 // to get the task handles
 #include "neo6m.h"
@@ -428,9 +429,9 @@ void app_main(void)
         vTaskDelay(1);
         if (gpio_get_level(POWER_GOOD_IO) == 0) // periodically check the power good pin
         {
+            power_good_count = 0; // reset good counter immediately
             if (power_bad_count < MIN_PWR_BAD_CNT)
             {
-                power_good_count = 0; // reset good counter
                 power_bad_count++;
                 if (power_bad_count == MIN_PWR_BAD_CNT) // only do it once
                 {
@@ -450,7 +451,7 @@ void app_main(void)
                 }
             }
         }
-        else if (power_bad_count)
+        else if (power_bad_count) // power was bad, we could be recovering
         {
             if (power_good_count < MIN_PWR_GOOD_CNT)
             {

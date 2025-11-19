@@ -41,6 +41,7 @@
     "esp_timer.h": "c",
     "lcm1602.h": "c",
     "i2c_master.h": "c",
-    "uart.h": "c"
+    "uart.h": "c",
+    "sdkconfig.h": "c"
   }
 }
