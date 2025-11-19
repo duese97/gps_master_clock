@@ -8,6 +8,7 @@
 #include "driver/uart.h"
 #include "bsp.h"
 #include "esp_system.h" // misc, for reset reason
+#include "esp_pm.h"
 
 // for OS methods
 #include "freertos/FreeRTOS.h"
@@ -378,6 +379,13 @@ void app_main(void)
     esp_reset_reason_t reason = esp_reset_reason();
     init_serial_print();
     gpio_set_direction(POWER_GOOD_IO, GPIO_MODE_INPUT);
+
+    esp_pm_config_t pm_config = {
+        .light_sleep_enable = true,
+        .min_freq_mhz = 20,
+        .max_freq_mhz = 80,
+    };
+    esp_pm_configure(&pm_config);
 
     PRINT_LOG("\nStarting application. Reset reason: %d\n", reason);
 
