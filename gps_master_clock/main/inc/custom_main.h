@@ -32,7 +32,7 @@
 
 #define ARRAY_LEN(x) (sizeof(x)/sizeof(x[0]))
 
-#define SET_NVS_DEFAULTS 1 // for debugging, set to 1 and flash to restore NVS defaults
+#define SET_NVS_DEFAULTS 0 // for debugging, set to 1 and flash to restore NVS defaults
 #define RAM_MIRROR_VALID_MAGIC 0xDEADBEEF // value to indicate the RAM mirror can be used
 
 #define NVS_NAMESPACE   "STORAGE"

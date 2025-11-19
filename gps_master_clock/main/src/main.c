@@ -234,12 +234,12 @@ static esp_err_t inital_nvs_load(bool soft_reset)
     }
     PRINT_LOG(
         "Using config:\n"
-        "\tcurrent_minutes_12o_clock: %d\n"
+        "\tcurrent_minutes_12o_clock: %d (%02d:%02d)\n"
         "\ttotal_pos_time_corrected: %lu total_neg_time_corrected: %lu\n"
         "\tmirror_saved_times: %lu\n"
         "\tpulse_len_ms: %u pulse_pause_ms: %u\n"
         "\tlast_connected_utc:%lld",
-        rm.current_minutes_12o_clock,
+        rm.current_minutes_12o_clock, rm.current_minutes_12o_clock / 60, rm.current_minutes_12o_clock % 60,
         rm.total_pos_time_corrected, rm.total_neg_time_corrected,
         rm.mirror_saved_times,
         rm.pulse_len_ms, rm.pulse_pause_ms,
@@ -382,8 +382,6 @@ void app_main(void)
 
     esp_pm_config_t pm_config = {
         .light_sleep_enable = true,
-        .min_freq_mhz = 20,
-        .max_freq_mhz = 80,
     };
     esp_pm_configure(&pm_config);
 
