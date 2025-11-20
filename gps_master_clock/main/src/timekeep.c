@@ -17,8 +17,47 @@ static const char* timezone_gmt = "GMT0";
 
 static SemaphoreHandle_t tz_mutex;
 
-static char* runtime_stat_buffer_ptr; // ~40B per task, 
-static uint8_t last_num_tasks = 0;
+
+static void print_stats(void)
+{
+    static uint8_t last_num_tasks = 0;
+    static char* runtime_stat_buffer_ptr; // ~40B per task, 
+
+    // some general stats:
+    PRINT_LOG(
+        "General:\n"
+        "\tFree heap: %lu, minimum free heap: %lu\n"
+        "\tTotal corrected: pos:%lus neg:%lus\n"
+        "\tUptime: %lus = %luh = %lud",
+        esp_get_free_heap_size(), esp_get_minimum_free_heap_size(),
+        rm.total_pos_time_corrected, rm.total_neg_time_corrected,
+        rm.total_uptime_seconds, rm.total_uptime_seconds / 3600, rm.total_uptime_seconds / (3600 * 24)
+    );
+    uint8_t curr_num_tasks = uxTaskGetNumberOfTasks();
+    if (last_num_tasks != curr_num_tasks)
+    { // number of tasks changed, re-allocate
+        if (runtime_stat_buffer_ptr)
+        { // free old buffer
+            vPortFree(runtime_stat_buffer_ptr);
+            runtime_stat_buffer_ptr = NULL;
+        }
+
+        PRINT_LOG("Re-allocating, task num changed from %u to %u", last_num_tasks, curr_num_tasks);
+
+        // see :https://www.freertos.org/Documentation/02-Kernel/04-API-references/03-Task-utilities/00-Task-utilities#vtaskgetruntimestats
+        // around 40B per task -> double it for safety
+        runtime_stat_buffer_ptr = pvPortMalloc(80 * curr_num_tasks);
+        if (runtime_stat_buffer_ptr)
+        { // if allocation worked: remember new amount of tasks
+            last_num_tasks = curr_num_tasks;
+        }
+    }
+    if (runtime_stat_buffer_ptr != NULL) // make sure allocation worked
+    {
+        vTaskGetRunTimeStats(runtime_stat_buffer_ptr);
+        PRINT_LOG("Runtime stats:\n%s", runtime_stat_buffer_ptr);
+    }
+}
 
 void take_tz_mutex(void)
 {
@@ -61,22 +100,33 @@ void timekeep_Task(void *parameter)
                     vTaskSuspend(NULL);
                     break;
                 }
-                case TASK_CMD_START_COMMISSIONING:
+                case TASK_CMD_STOP_COMMISSIONING:
                 {
-
                     clock_minutes_diff = 0;
+                    commissioning = false;
                     break;
                 }
-                case TASK_CMD_TRIGGER_TICK:
+                case TASK_CMD_ADVANCE_MINUTE:
                 {
                     // set commissioning flag and force one tick
                     commissioning = true;
                     clock_minutes_diff = 1;
                     break;
                 }
+                case TASK_CMD_ADVANCE_HOUR:
+                {
+                    // set commissioning flag and force one tick
+                    commissioning = true;
+                    clock_minutes_diff = 60;
+                    break;
+                }
                 case TASK_CMD_SECOND_TICK:
                 {
                     rm.total_uptime_seconds++;
+                    if (rm.total_uptime_seconds % 60 == 0)
+                    {
+                        print_stats();
+                    }
 
                     if (commissioning == true) // if commissioning right now -> skip all of the handling
                     {
@@ -120,12 +170,11 @@ void timekeep_Task(void *parameter)
                         continue;
                     }
 
-                    int target_minutes_12o_clock = target_local_time.tm_hour % 12; // we only have a 12 hour clock
-                    target_minutes_12o_clock *= 60; // 60 minutes per hour
-                    target_minutes_12o_clock += target_local_time.tm_min; // add minutes normally
+                    int target_minutes_12o_clock = target_local_time.tm_hour * 60 + target_local_time.tm_min;
 
                     // determine the current difference
                     clock_minutes_diff = target_minutes_12o_clock - rm.current_minutes_12o_clock;
+                    clock_minutes_diff = clock_minutes_diff % MINUTES_PER_12H;
 
                     if (clock_minutes_diff > 0)
                     {
@@ -159,41 +208,6 @@ void timekeep_Task(void *parameter)
                         clock_minutes_diff,
                         target_local_time.tm_hour % 12, target_local_time.tm_min,
                         target_local_time.tm_hour, target_local_time.tm_min);
-
-                    // some general stats:
-                    PRINT_LOG(
-                        "General:\n"
-                        "\tFree heap: %lu, minimum free heap: %lu\n"
-                        "\tTotal corrected: pos:%lus neg:%lus\n"
-                        "\tUptime: %lus = %luh = %lud",
-                        esp_get_free_heap_size(), esp_get_minimum_free_heap_size(),
-                        rm.total_pos_time_corrected, rm.total_neg_time_corrected,
-                        rm.total_uptime_seconds, rm.total_uptime_seconds / 3600, rm.total_uptime_seconds / (3600 * 24)
-                    );
-                    uint8_t curr_num_tasks = uxTaskGetNumberOfTasks();
-                    if (last_num_tasks != curr_num_tasks)
-                    { // number of tasks changed, re-allocate
-                        if (runtime_stat_buffer_ptr)
-                        { // free old buffer
-                            vPortFree(runtime_stat_buffer_ptr);
-                            runtime_stat_buffer_ptr = NULL;
-                        }
-
-                        PRINT_LOG("Re-allocating, task num changed from %u to %u", last_num_tasks, curr_num_tasks);
-
-                        // see :https://www.freertos.org/Documentation/02-Kernel/04-API-references/03-Task-utilities/00-Task-utilities#vtaskgetruntimestats
-                        // around 40B per task -> double it for safety
-                        runtime_stat_buffer_ptr = pvPortMalloc(80 * curr_num_tasks);
-                        if (runtime_stat_buffer_ptr)
-                        { // if allocation worked: remember new amount of tasks
-                            last_num_tasks = curr_num_tasks;
-                        }
-                    }
-                    if (runtime_stat_buffer_ptr != NULL) // make sure allocation worked
-                    {
-                        vTaskGetRunTimeStats(runtime_stat_buffer_ptr);
-                        PRINT_LOG("Runtime stats:\n%s", runtime_stat_buffer_ptr);
-                    }
                     break;
                 }
                 default:

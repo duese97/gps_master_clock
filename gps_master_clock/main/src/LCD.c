@@ -12,8 +12,8 @@
 // '13:08:00 15.11.2025 DST: 0    ' = 26 chars + 4 spaces + 1 null
 #define MAX_TIME_PRINT_LEN 30
 
-#define SHORT_PRESS_DURATION_MS 40
-#define LONG_PRESS_DURATION_MS 500
+#define SHORT_PRESS_DURATION_MS ( 25 / portTICK_PERIOD_MS )
+#define LONG_PRESS_DURATION_MS  ( 500 / portTICK_PERIOD_MS )
 
 enum
 {
@@ -29,9 +29,10 @@ enum
 enum
 {
     BTN_NO_PRESS,
+    BTN_DEBOUNCE,
     BTN_SHORT_PRESS,
-    BTN_LONG_PRESS_START,
-    BTN_LONG_PRESS_RELEASED,
+    BTN_LONG_PRESS,
+    NUM_BTN_STATES
 };
 
 
@@ -50,50 +51,81 @@ static uint8_t backslash_charmap[] =
     0b00000000
 };
 
-void Btn_Task(void *parameter)
-{
-    uint8_t btn_state = BTN_NO_PRESS;
-    uint32_t press_start = 0, last_press = 0;
+TimerHandle_t btn_timer;
 
-    while(1)
+
+void btn_handler(bool timer_triggered)
+{
+    static task_msg_t msg = {.dst = TASK_LCD };
+    static uint8_t btn_state = BTN_NO_PRESS;
+
+    static const uint32_t timer_periods[NUM_BTN_STATES] =
     {
-        // check if first level change detected
-        if (press_start == 0 && gpio_get_level(USR_BUTTON_IO) == USR_BUTTON_PRESS_LVL)
+        [BTN_NO_PRESS]      = 0,
+        [BTN_DEBOUNCE]      = SHORT_PRESS_DURATION_MS,
+        [BTN_SHORT_PRESS]   = LONG_PRESS_DURATION_MS,
+        [BTN_LONG_PRESS]    = 0, // do not continue after the long press
+    };
+
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    int btn_lvl = gpio_get_level(USR_BUTTON_IO);
+
+    if (btn_lvl == USR_BUTTON_PRESS_LVL)
+    {
+        if (timer_triggered)
+        { // timer triggered handler + still pressed
+            btn_state++;
+        }
+        else
+        { // external interrupt triggered handler + button was just pressed
+            btn_state = BTN_DEBOUNCE; // reset state back to start
+        }
+
+        if (timer_periods[btn_state] == 0)
         {
-            press_start = ESP_IDF_MILLIS();
-            last_press = press_start;
-        }   
-        else if (press_start) // button press started?
+            return; // nothing to be done anymore, await interrupt
+        }
+
+        uint32_t next_period = timer_periods[btn_state];
+        if (timer_triggered)
         {
-            uint32_t diff = ESP_IDF_MILLIS() - press_start;
-            if (gpio_get_level(USR_BUTTON_IO) != USR_BUTTON_PRESS_LVL) // released again?
-            {
-                press_start = 0;
-                if (diff >= LONG_PRESS_DURATION_MS)
-                {
-                    PRINT_LOG("Long Press released");
-                    btn_state = BTN_LONG_PRESS_RELEASED;
-                }
-                else if (diff >= SHORT_PRESS_DURATION_MS)
-                {
-                    PRINT_LOG("Short Press");
-                    btn_state = BTN_SHORT_PRESS;
-                }
-                else
-                {
-                    btn_state = BTN_NO_PRESS;
-                }
-            }
-            else if (diff >= LONG_PRESS_DURATION_MS) // still pressed
-            {
-                btn_state = BTN_LONG_PRESS_START;
-            }
-            else
-            {
-                btn_state = BTN_NO_PRESS;
-            }
+            PRINT_LOG("State: %d period: %lu", btn_state, next_period);
+            xTimerChangePeriod(btn_timer, next_period, 1);
+            xTimerStart(btn_timer, 1);
+        }
+        else
+        {
+            xTimerChangePeriodFromISR(btn_timer, next_period, &xHigherPriorityTaskWoken);
+            xTimerStartFromISR(btn_timer, &xHigherPriorityTaskWoken);
         }
     }
+    else // released
+    {
+        if (btn_state == BTN_SHORT_PRESS || btn_state == BTN_LONG_PRESS)
+        {
+            msg.cmd = (btn_state == BTN_SHORT_PRESS) ? TASK_CMD_BTN_PRESS_SHORT : TASK_CMD_BTN_PRESS_LONG;
+    
+            if (timer_triggered)
+                sendTaskMessage(&msg);
+            else
+                sendTaskMessageISR(&msg);
+        } // else prematurely released, do nothing
+
+        if (timer_triggered == false)
+        {
+            xTimerStopFromISR(btn_timer, &xHigherPriorityTaskWoken); // make sure the timer is off
+        }
+        btn_state = BTN_NO_PRESS; // reset state
+    }
+    if (xHigherPriorityTaskWoken) // check if task switch happened
+    {
+        portYIELD_FROM_ISR();
+    }
+}
+
+static void timer_callback(TimerHandle_t xTimer)
+{
+    btn_handler(true);
 }
 
 void LCD_Task(void *parameter)
@@ -104,32 +136,43 @@ void LCD_Task(void *parameter)
     char scratch_buff[NUM_COLUMNS + 1]; // to temporarily format the time
     int wait_animation_idx = 0;
     int status_screen_idx = STATUS_START_IDX;
+    bool use_display = true;
 
     task_msg_t msg;
     GPS_LOCK_STATE_t lock_state_local = GPS_LOCK_UNINITIALIZED;
     struct tm tm; // local time struct
 
     if (LCD_I2C_begin(NUM_COLUMNS, NUM_ROWS) != ESP_OK)
-    { // in case no display was found just poll/consume the task messages to avoid overflowing the queue
+    { // in case no display was found
         PRINT_LOG("Unable to setup LCD I2C!");
-        while(1)
-        {
-            receiveTaskMessage(TASK_LCD, 500, &msg);
-        }
+        use_display = false;
+    }
+    else
+    {
+        PRINT_LOG("LCD init done");
     }
 
-    PRINT_LOG("LCD init done");
+    btn_timer = xTimerCreate(
+                "btn timer",                    /* Just a text name, not used by the RTOS kernel. */                    
+                SHORT_PRESS_DURATION_MS,   /* The timer period in ticks, must be greater than 0. */
+                pdFALSE,                        /* The timer will not auto-reload themselves when they expire. */
+                ( void * ) 0,
+                timer_callback
+    );
 
-    LCD_I2C_setCursor(0, 0);
-    LCD_I2C_print("GPS Master Clock");
-    LCD_I2C_setCursor(0, 1);
-    LCD_I2C_print("  2025 D.Weber  ");
-
-    // for some reason the driver has no backslash, create one ourself
-    // for some other reason writing to GRAM only works after the prints above
-    LCD_I2C_createChar(GRAM_BACKSLASH_INDEX, backslash_charmap);
-
-    vTaskDelay(1000);
+    if (use_display)
+    {
+        LCD_I2C_setCursor(0, 0);
+        LCD_I2C_print("GPS Master Clock");
+        LCD_I2C_setCursor(0, 1);
+        LCD_I2C_print("  2025 D.Weber  ");
+    
+        // for some reason the driver has no backslash, create one ourself
+        // for some other reason writing to GRAM only works after the prints above
+        LCD_I2C_createChar(GRAM_BACKSLASH_INDEX, backslash_charmap);
+    
+        vTaskDelay(1000);
+    }
 
     while(1)
     {
@@ -165,10 +208,27 @@ void LCD_Task(void *parameter)
                 }
                 case TASK_CMD_SHUTDOWN:
                 {
-                    LCD_I2C_backlight(false); // disable backlight to save power
-                    LCD_I2C_clear(); // dummy command for backlight to take effect
+                    if (use_display)
+                    {
+                        LCD_I2C_backlight(false); // disable backlight to save power
+                        LCD_I2C_clear(); // dummy command for backlight to take effect
+                    }
                     vTaskSuspend(NULL);
-                    LCD_I2C_backlight(true); // enable again
+
+                    if (use_display)
+                    {
+                        LCD_I2C_backlight(true); // enable again
+                    }
+                    break;
+                }
+                case TASK_CMD_BTN_PRESS_LONG:
+                {
+                    PRINT_LOG("Long btn press");
+                    break;
+                }
+                case TASK_CMD_BTN_PRESS_SHORT:
+                {
+                    PRINT_LOG("Short btn press");
                     break;
                 }
                 default:
@@ -179,6 +239,13 @@ void LCD_Task(void *parameter)
         }
         
         /* all actions which need to be polled */
+
+
+        // beyond this point: only LCD related things
+        if (use_display == false)
+        {
+            continue;
+        }
 
         // scrolling time value handling
         int overhang = MAX_TIME_PRINT_LEN - (curr_src_start + NUM_COLUMNS);
@@ -202,15 +269,7 @@ void LCD_Task(void *parameter)
         // print the result
         scratch_buff[NUM_COLUMNS] = 0;
         LCD_I2C_setCursor(0, 0);
-        if (LCD_I2C_print(scratch_buff) != ESP_OK)
-        {
-            PRINT_LOG("Unable to print time to LCD");
-            while(1)
-            {
-                receiveTaskMessage(TASK_LCD, 500, &msg);
-            }
-        }
-
+        LCD_I2C_print(scratch_buff);
 
         LCD_I2C_setCursor(0, 1);
         switch(status_screen_idx)

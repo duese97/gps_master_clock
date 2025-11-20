@@ -53,6 +53,7 @@
 #define STACKSIZE_NEO6M     4096
 #define STACKSIZE_TIMEKEEP  2028
 #define STACKSIZE_LCD       4096
+#define STACKSIZE_PWR       2028
 
 /* TASK */
 enum
@@ -61,12 +62,14 @@ enum
     TASK_PRIO_LCD = 1,
     TASK_PRIO_TIMEKEEP,
     TASK_PRIO_NEO6M,
+    TASK_PRIO_PWR,
 };
 
 // task stacks, task handles (for inter task communication) and messaging
 SETUP_TASK_VARS(LCD, STACKSIZE_LCD, QUEUE_STORAGE_GENERAL);
 SETUP_TASK_VARS(TIMEKEEP, STACKSIZE_TIMEKEEP, QUEUE_STORAGE_GENERAL);
 SETUP_TASK_VARS(NEO6M, STACKSIZE_NEO6M, QUEUE_STORAGE_GENERAL);
+SETUP_TASK_VARS(PWR, STACKSIZE_PWR, 0);
 
 // for fast and uncomplicated assignment of task ID<->queue
 static const QueueHandle_t *handleLookup[] =
@@ -374,6 +377,105 @@ esp_err_t store_ram_mirror(void)
     return err;
 }
 
+static void IRAM_ATTR gpio_interrupt_handler(void *args)
+{
+    gpio_num_t pinNumber = *((gpio_num_t*)args);
+    if (pinNumber == USR_BUTTON_IO)
+    {
+        btn_handler(false);
+    }
+    else if (pinNumber == POWER_GOOD_IO)
+    {
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        xTaskNotifyFromISR( taskHandlePWR, 0, eSetBits, &xHigherPriorityTaskWoken );
+        portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
+    }
+}
+
+void handle_power_bad(void)
+{
+    int power_bad_count = 0, power_good_count = 0;
+    while(1)
+    {
+        if (gpio_get_level(POWER_GOOD_IO) == 0) // periodically check the power good pin
+        {
+            power_good_count = 0; // reset good counter immediately
+            if (power_bad_count < MIN_PWR_BAD_CNT)
+            {
+                power_bad_count++;
+                if (power_bad_count == MIN_PWR_BAD_CNT) // only do it once
+                {
+                    PRINT_LOG("Power bad, shutting down tasks");
+                    
+                    // Tasks which are a bit more delicate, let them finish what they are doing right now
+                    task_msg_t msg = {.cmd = TASK_CMD_SHUTDOWN, .dst = TASK_TIMEKEEP };
+                    sendTaskMessage(&msg);
+                    msg.dst = TASK_LCD;
+                    sendTaskMessage(&msg);
+
+                    wait_shutdown();
+                    PRINT_LOG("Shutdown complete, storing..");
+
+                    // it's now OK to save the system state
+                    store_ram_mirror();
+                }
+            }
+        }
+        else if (power_bad_count) // power was bad, we could be recovering
+        {
+            if (power_good_count < MIN_PWR_GOOD_CNT)
+            {
+                power_good_count++;
+                if (power_good_count == MIN_PWR_GOOD_CNT) // only do it once
+                {
+                    PRINT_LOG("Power recovered, resuming tasks");
+
+                    power_bad_count = 0;
+                    power_good_count = 0;
+
+                    // resume all tasks
+                    vTaskResume(taskHandleLCD);
+                    vTaskResume(taskHandleTIMEKEEP);
+                    break;
+                }
+            }
+        } // else: do nothing when no power bad detected
+        vTaskDelay(1); // wait some time
+    }
+}
+
+
+void PWR_Task(void *parameter)
+{
+    uint32_t ulNotifiedValue;
+
+    static const gpio_num_t pwr_good_io = POWER_GOOD_IO;
+    static const gpio_num_t usr_btn_io = USR_BUTTON_IO;
+
+    // Setup power good IO as external interrupt
+    gpio_set_direction(POWER_GOOD_IO, GPIO_MODE_INPUT);
+    gpio_set_intr_type(POWER_GOOD_IO, GPIO_INTR_NEGEDGE);
+
+    // Setup button IO as external interrupt
+    gpio_set_direction(USR_BUTTON_IO, GPIO_MODE_INPUT);
+    gpio_set_intr_type(USR_BUTTON_IO, GPIO_INTR_ANYEDGE);
+
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(USR_BUTTON_IO, gpio_interrupt_handler, &usr_btn_io);
+    gpio_isr_handler_add(POWER_GOOD_IO, gpio_interrupt_handler, &pwr_good_io);
+
+    while(1)
+    {
+
+         xTaskNotifyWait( 0x00,             /* Don't clear any notification bits on entry. */
+                         ULONG_MAX,         /* Reset the notification value to 0 on exit. */
+                         &ulNotifiedValue,  /* Notified value pass out in ulNotifiedValue. */
+                         portMAX_DELAY      /* Block indefinitely. */
+        );
+        handle_power_bad();
+    }
+}
+
 void app_main(void)
 {
     esp_reset_reason_t reason = esp_reset_reason();
@@ -429,51 +531,13 @@ void app_main(void)
         &taskBufferLCD
     );
 
-    int power_bad_count = 0, power_good_count = 0;
-    while(1)
-    {
-        vTaskDelay(1);
-        if (gpio_get_level(POWER_GOOD_IO) == 0) // periodically check the power good pin
-        {
-            power_good_count = 0; // reset good counter immediately
-            if (power_bad_count < MIN_PWR_BAD_CNT)
-            {
-                power_bad_count++;
-                if (power_bad_count == MIN_PWR_BAD_CNT) // only do it once
-                {
-                    PRINT_LOG("Power bad, shutting down tasks");
-                    
-                    // Tasks which are a bit more delicate, let them finish what they are doing right now
-                    task_msg_t msg = {.cmd = TASK_CMD_SHUTDOWN, .dst = TASK_TIMEKEEP };
-                    sendTaskMessage(&msg);
-                    msg.dst = TASK_LCD;
-                    sendTaskMessage(&msg);
-
-                    wait_shutdown();
-                    PRINT_LOG("Shutdown complete, storing..");
-
-                    // it's now OK to save the system state
-                    store_ram_mirror();
-                }
-            }
-        }
-        else if (power_bad_count) // power was bad, we could be recovering
-        {
-            if (power_good_count < MIN_PWR_GOOD_CNT)
-            {
-                power_good_count++;
-                if (power_good_count == MIN_PWR_GOOD_CNT) // only do it once
-                {
-                    PRINT_LOG("Power recovered, resuming tasks");
-
-                    power_bad_count = 0;
-                    power_good_count = 0;
-
-                    // resume all tasks
-                    vTaskResume(taskHandleLCD);
-                    vTaskResume(taskHandleTIMEKEEP);
-                }
-            }
-        } // else: do nothing when no power bad detected
-    }
+    taskHandlePWR = xTaskCreateStatic(
+        PWR_Task,
+        "PWR",
+        STACKSIZE_PWR,
+        NULL,
+        TASK_PRIO_PWR,
+        taskStackPWR,
+        &taskBufferPWR
+    );
 }
