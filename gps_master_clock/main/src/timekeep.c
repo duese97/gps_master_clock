@@ -77,7 +77,7 @@ void give_tz_mutex(void)
     xSemaphoreGive(tz_mutex); 
 }
 
-void timekeep_Task(void *parameter)
+void TIMEKEEP_Task(void *parameter)
 {
     static task_msg_t local_time_msg = {.dst = TASK_LCD, .cmd = TASK_CMD_LOCAL_TIME };
     int clock_minutes_diff = 0; // difference to correct time

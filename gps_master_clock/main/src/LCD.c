@@ -4,6 +4,11 @@
 #include "custom_main.h"
 #include "bsp.h"
 
+
+//---------------------------------------------------------------------------
+// Macros
+//---------------------------------------------------------------------------
+
 #define NUM_COLUMNS 16
 #define NUM_ROWS 2
 
@@ -14,6 +19,11 @@
 
 #define SHORT_PRESS_DURATION_MS ( 25 / portTICK_PERIOD_MS )
 #define LONG_PRESS_DURATION_MS  ( 500 / portTICK_PERIOD_MS )
+
+
+//---------------------------------------------------------------------------
+// Enums
+//---------------------------------------------------------------------------
 
 enum
 {
@@ -36,8 +46,12 @@ enum
 };
 
 
+//---------------------------------------------------------------------------
+// Local constants
+//---------------------------------------------------------------------------
+
 static const char wait_animation[] = {'|', '/', '-', GRAM_BACKSLASH_INDEX};
-static uint8_t backslash_charmap[] =
+static const uint8_t backslash_charmap[] =
 {
  // these bits are usable:
  //      <--->
@@ -51,8 +65,126 @@ static uint8_t backslash_charmap[] =
     0b00000000
 };
 
-TimerHandle_t btn_timer;
 
+//---------------------------------------------------------------------------
+// Local variables
+//---------------------------------------------------------------------------
+
+static TimerHandle_t btn_timer;
+
+
+//---------------------------------------------------------------------------
+// Local functions
+//---------------------------------------------------------------------------
+
+static void btn_timer_callback(TimerHandle_t xTimer)
+{
+    (void)xTimer;
+    btn_handler(true);
+}
+
+static void LCD_print_default_displays(char* time_print_buff, int status_screen_idx, GPS_LOCK_STATE_t lock_state_local)
+{
+    static int curr_src_start = 0; // index where to start copying from the time buffer
+    static int wait_animation_idx = 0;
+
+    char scratch_buff[NUM_COLUMNS + 1 + 1 /*so that compiler does not complain*/]; // to temporarily format the time etc.
+
+    // scrolling time value handling
+    int overhang = MAX_TIME_PRINT_LEN - (curr_src_start + NUM_COLUMNS);
+    if (overhang >= 0)
+    { // buffer is completely within
+        memcpy(scratch_buff, time_print_buff + curr_src_start, NUM_COLUMNS);
+    }
+    else
+    { // almost at the end, only some chunks left to copy, start with filling up from the start again
+        memcpy(scratch_buff, time_print_buff + curr_src_start, NUM_COLUMNS + overhang);
+        memcpy(scratch_buff + NUM_COLUMNS + overhang, time_print_buff, -overhang);
+    }
+
+    // increment src index, wrap around if needed
+    curr_src_start++;
+    if (curr_src_start >= MAX_TIME_PRINT_LEN)
+    {
+        curr_src_start = 0;
+    }
+
+    // print the result
+    scratch_buff[NUM_COLUMNS] = 0;
+    LCD_I2C_setCursor(0, 0);
+    LCD_I2C_print(scratch_buff);
+
+    LCD_I2C_setCursor(0, 1);
+    switch(status_screen_idx)
+    {
+        case STATUS_GPS_LOCK:
+        {
+            if (lock_state_local == GPS_LOCKED)
+            {
+                LCD_I2C_print("GPS locked      ");
+            }
+            else
+            {
+                snprintf(scratch_buff, sizeof(scratch_buff), "Await GPS lock %c", wait_animation[wait_animation_idx]);
+                LCD_I2C_print(scratch_buff);
+
+                wait_animation_idx++;
+                if (wait_animation_idx >= ARRAY_LEN(wait_animation))
+                    wait_animation_idx = 0;
+            }
+            break;
+        }
+        case STATUS_CORRECTION_POS:
+        {
+            snprintf(scratch_buff, sizeof(scratch_buff), "Lag:   %8lus", rm.total_pos_time_corrected);
+            LCD_I2C_print(scratch_buff);
+            break;
+        }
+        case STATUS_CORRECTION_NEG:
+        {
+            snprintf(scratch_buff, sizeof(scratch_buff), "Lead:  %8lus", rm.total_neg_time_corrected);
+            LCD_I2C_print(scratch_buff);
+            break;
+        }
+        case STATUS_TOTAL_UPTIME:
+        { // print the uptime in a well readable form
+            uint32_t uptime_val =  rm.total_uptime_seconds;
+            char uptime_unit = 's';
+            if (uptime_val > 3600)
+            {
+                uptime_val /= 3600;
+                if (uptime_val > 24)
+                {
+                    uptime_val /= 24;
+                    uptime_unit = 'd';
+                }
+                else
+                {
+                    uptime_unit = 'h';
+                }
+            }
+            snprintf(scratch_buff, sizeof(scratch_buff), "Uptime %8lu%c", uptime_val, uptime_unit);
+            LCD_I2C_print(scratch_buff);
+            break;
+        }
+        case STATUS_CLOCK_FACE_TIME:
+        {
+            uint8_t hours = rm.current_minutes_12o_clock / 60;
+            uint8_t minutes = rm.current_minutes_12o_clock % 60;
+            snprintf(scratch_buff, sizeof(scratch_buff), "Clock:     %02u:%02u", hours, minutes);
+            LCD_I2C_print(scratch_buff);
+            break;
+        }
+        default:
+        {
+            break;
+        }
+    }
+}
+
+//---------------------------------------------------------------------------
+// Global functions
+//---------------------------------------------------------------------------
 
 void btn_handler(bool timer_triggered)
 {
@@ -68,73 +200,60 @@ void btn_handler(bool timer_triggered)
     };
 
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    int btn_lvl = gpio_get_level(USR_BUTTON_IO);
-
-    if (btn_lvl == USR_BUTTON_PRESS_LVL)
+    
+    if (gpio_get_level(USR_BUTTON_IO) == USR_BUTTON_PRESS_LVL)
     {
         if (timer_triggered)
         { // timer triggered handler + still pressed
-            btn_state++;
+            if (btn_state < BTN_LONG_PRESS)
+                btn_state++;
         }
         else
         { // external interrupt triggered handler + button was just pressed
             btn_state = BTN_DEBOUNCE; // reset state back to start
         }
-
-        if (timer_periods[btn_state] == 0)
-        {
-            return; // nothing to be done anymore, await interrupt
-        }
-
+        
         uint32_t next_period = timer_periods[btn_state];
-        if (timer_triggered)
+        if (next_period == 0)
+        {
+            // nothing to be done currently
+        }
+        else if (timer_triggered)
         {
             PRINT_LOG("State: %d period: %lu", btn_state, next_period);
             xTimerChangePeriod(btn_timer, next_period, 1);
-            xTimerStart(btn_timer, 1);
         }
         else
         {
             xTimerChangePeriodFromISR(btn_timer, next_period, &xHigherPriorityTaskWoken);
-            xTimerStartFromISR(btn_timer, &xHigherPriorityTaskWoken);
         }
     }
-    else // released
+    else if (timer_triggered == false) // released, should come here only via interrupt
     {
         if (btn_state == BTN_SHORT_PRESS || btn_state == BTN_LONG_PRESS)
         {
             msg.cmd = (btn_state == BTN_SHORT_PRESS) ? TASK_CMD_BTN_PRESS_SHORT : TASK_CMD_BTN_PRESS_LONG;
-    
-            if (timer_triggered)
-                sendTaskMessage(&msg);
-            else
-                sendTaskMessageISR(&msg);
+            sendTaskMessageISR(&msg);                
         } // else prematurely released, do nothing
-
-        if (timer_triggered == false)
-        {
-            xTimerStopFromISR(btn_timer, &xHigherPriorityTaskWoken); // make sure the timer is off
-        }
+        xTimerStopFromISR(btn_timer, &xHigherPriorityTaskWoken); // make sure the timer is off
+        btn_state = BTN_NO_PRESS; // reset state        
+    }
+    else // released, somehow timer ended here
+    {
+        PRINT_LOG("Released, but timer triggered");
         btn_state = BTN_NO_PRESS; // reset state
     }
+
     if (xHigherPriorityTaskWoken) // check if task switch happened
     {
         portYIELD_FROM_ISR();
     }
 }
 
-static void timer_callback(TimerHandle_t xTimer)
-{
-    btn_handler(true);
-}
-
 void LCD_Task(void *parameter)
 {
     // contains the current time, is of fixed length (why +6 -> compiler needs this to remove annoying warning)
     char time_print_buff[MAX_TIME_PRINT_LEN + 1 + 6] = "??:??:?? ??.??.???? DST: ?    ";
-    int curr_src_start = 0; // index where to start copying from the time buffer
-    char scratch_buff[NUM_COLUMNS + 1]; // to temporarily format the time
-    int wait_animation_idx = 0;
     int status_screen_idx = STATUS_START_IDX;
     bool use_display = true;
 
@@ -157,7 +276,7 @@ void LCD_Task(void *parameter)
                 SHORT_PRESS_DURATION_MS,   /* The timer period in ticks, must be greater than 0. */
                 pdFALSE,                        /* The timer will not auto-reload themselves when they expire. */
                 ( void * ) 0,
-                timer_callback
+                btn_timer_callback
     );
 
     if (use_display)
@@ -240,107 +359,11 @@ void LCD_Task(void *parameter)
         
         /* all actions which need to be polled */
 
-
         // beyond this point: only LCD related things
         if (use_display == false)
         {
             continue;
         }
-
-        // scrolling time value handling
-        int overhang = MAX_TIME_PRINT_LEN - (curr_src_start + NUM_COLUMNS);
-        if (overhang >= 0)
-        { // buffer is completely within
-            memcpy(scratch_buff, time_print_buff + curr_src_start, NUM_COLUMNS);
-        }
-        else
-        { // almost at the end, only some chunks left to copy, start with filling up from the start again
-            memcpy(scratch_buff, time_print_buff + curr_src_start, NUM_COLUMNS + overhang);
-            memcpy(scratch_buff + NUM_COLUMNS + overhang, time_print_buff, -overhang);
-        }
-
-        // increment src index, wrap around if needed
-        curr_src_start++;
-        if (curr_src_start >= MAX_TIME_PRINT_LEN)
-        {
-            curr_src_start = 0;
-        }
-
-        // print the result
-        scratch_buff[NUM_COLUMNS] = 0;
-        LCD_I2C_setCursor(0, 0);
-        LCD_I2C_print(scratch_buff);
-
-        LCD_I2C_setCursor(0, 1);
-        switch(status_screen_idx)
-        {
-            case STATUS_GPS_LOCK:
-            {
-                if (lock_state_local == GPS_LOCKED)
-                {
-                    LCD_I2C_print("GPS locked      ");
-                }
-                else
-                {
-                    snprintf(scratch_buff, sizeof(scratch_buff), "Await GPS lock %c", wait_animation[wait_animation_idx]);
-                    LCD_I2C_print(scratch_buff);
-    
-                    wait_animation_idx++;
-                    if (wait_animation_idx >= ARRAY_LEN(wait_animation))
-                    {
-                        wait_animation_idx = 0;
-                    }
-                }
-
-                break;
-            }
-            case STATUS_CORRECTION_POS:
-            {
-                snprintf(scratch_buff, sizeof(scratch_buff), "Corr.+ %8lus", rm.total_pos_time_corrected);
-                LCD_I2C_print(scratch_buff);
-                break;
-            }
-            case STATUS_CORRECTION_NEG:
-            {
-                snprintf(scratch_buff, sizeof(scratch_buff), "Corr.- %8lus", rm.total_neg_time_corrected);
-                LCD_I2C_print(scratch_buff);
-                break;
-            }
-            case STATUS_TOTAL_UPTIME:
-            {
-                uint32_t uptime_hours = rm.total_uptime_seconds / 3600;
-                uint32_t uptime_days = uptime_hours / 24;
-                if (uptime_hours == 0)
-                {
-                    snprintf(scratch_buff, sizeof(scratch_buff), "Uptime %8lus", rm.total_uptime_seconds);
-                }
-                else if (uptime_days == 0)
-                {
-                    snprintf(scratch_buff, sizeof(scratch_buff), "Uptime %8luh", uptime_hours);
-                }
-                else
-                {
-                    snprintf(scratch_buff, sizeof(scratch_buff), "Uptime %8lud", uptime_days);
-                }
-                LCD_I2C_print(scratch_buff);
-                break;
-            }
-            case STATUS_CLOCK_FACE_TIME:
-            {
-                uint8_t hours = rm.current_minutes_12o_clock / 60;
-                uint8_t minutes = rm.current_minutes_12o_clock % 60;
-                int pos = snprintf(scratch_buff, sizeof(scratch_buff), "Clock: %02u:%02u", hours, minutes);
-                if (pos < NUM_COLUMNS)
-                {
-                    memset(scratch_buff + pos, ' ', NUM_COLUMNS-pos);
-                }
-                LCD_I2C_print(scratch_buff);
-                break;
-            }
-            default:
-            {
-                break;
-            }
-        }
+        LCD_print_default_displays(time_print_buff, status_screen_idx, lock_state_local);
     }
 }

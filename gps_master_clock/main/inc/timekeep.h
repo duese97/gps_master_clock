@@ -5,7 +5,7 @@
 #include <stdbool.h>
 
 // exported vars
-void timekeep_Task(void *parameter);
+void TIMEKEEP_Task(void *parameter);
 void take_tz_mutex(void);
 void give_tz_mutex(void);
 

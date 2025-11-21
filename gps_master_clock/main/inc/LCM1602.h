@@ -105,7 +105,7 @@ void LCD_I2C_moveCursorLeft(void);
 void LCD_I2C_autoscroll(void);
 void LCD_I2C_noAutoscroll(void);
 
-void LCD_I2C_createChar(uint8_t location, uint8_t charmap[]);
+void LCD_I2C_createChar(uint8_t location, const uint8_t charmap[]);
 void LCD_I2C_backlight(uint8_t on);
 
 #endif // _LCM1602_H_

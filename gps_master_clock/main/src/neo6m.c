@@ -16,6 +16,7 @@
 
 
 #define SECOND_TIMER_PERIOD_US 1000000ULL
+#define UART_BLOCK_TICKS 2000
 
 /* Configure parameters of an UART driver, communication pins and install the driver */
 const uart_config_t uart_config = {
@@ -57,7 +58,7 @@ static const esp_timer_create_args_t periodic_timer_args =
 
 
 
-void neo6M_Task(void *parameter)
+void NEO6M_Task(void *parameter)
 {
      // prepare message
     static task_msg_t msg_locked = {.dst = TASK_LCD, .cmd = TASK_CMD_GPS_LOCK_STATE };
@@ -79,7 +80,7 @@ void neo6M_Task(void *parameter)
 
     while(1)
     {
-        int res = uart_read_bytes(NEO6M_UART, &buf, sizeof(buf), 2000); // normally data should frequently come in
+        int res = uart_read_bytes(NEO6M_UART, &buf, sizeof(buf), UART_BLOCK_TICKS); // normally data should frequently come in
         if (res <= 0) 
         { // timed out or any other error
             if (lock_state != GPS_LOCK_LOST) // only need to set state / send message once

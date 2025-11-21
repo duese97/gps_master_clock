@@ -28,7 +28,7 @@
     static TaskHandle_t taskHandle##taskname;                  \
     static StaticTask_t taskBuffer##taskname;                  \
     static QueueHandle_t queueHandle##taskname;                \
-    static uint8_t queueStorageArea##taskname[queueElemByteCnt]
+    static uint8_t queueStorageArea##taskname[queueElemByteCnt];
 
 #define SETUP_TASK_VARS_NO_QUEUE(taskname, stacksize)  \
     static StackType_t taskStack##taskname[stacksize]; \
@@ -42,6 +42,17 @@
         QUEUE_ELEM_LEN,                                      \
         queueStorageArea##taskname,                          \
         &queue##taskname)
+
+#define CREATE_TASK_STATIC(taskname)                         \
+    xTaskCreateStatic(                                       \
+            taskname##_Task,                                 \
+            #taskname,                                       \
+            STACKSIZE_##taskname,                            \
+            NULL,                                            \
+            TASK_PRIO_##taskname,                            \
+            taskStack##taskname,                             \
+            &taskBuffer##taskname                            \
+    )
 
 /* Messaging */
 #define QUEUE_LEN_GENERAL 3
@@ -66,10 +77,10 @@ enum
 };
 
 // task stacks, task handles (for inter task communication) and messaging
-SETUP_TASK_VARS(LCD, STACKSIZE_LCD, QUEUE_STORAGE_GENERAL);
-SETUP_TASK_VARS(TIMEKEEP, STACKSIZE_TIMEKEEP, QUEUE_STORAGE_GENERAL);
-SETUP_TASK_VARS(NEO6M, STACKSIZE_NEO6M, QUEUE_STORAGE_GENERAL);
-SETUP_TASK_VARS(PWR, STACKSIZE_PWR, 0);
+SETUP_TASK_VARS(LCD, STACKSIZE_LCD, QUEUE_STORAGE_GENERAL)
+SETUP_TASK_VARS(TIMEKEEP, STACKSIZE_TIMEKEEP, QUEUE_STORAGE_GENERAL)
+SETUP_TASK_VARS_NO_QUEUE(NEO6M, STACKSIZE_NEO6M)
+SETUP_TASK_VARS_NO_QUEUE(PWR, STACKSIZE_PWR)
 
 // for fast and uncomplicated assignment of task ID<->queue
 static const QueueHandle_t *handleLookup[] =
@@ -90,6 +101,16 @@ static const ram_mirror_t rm_dflt =
     .magic_word = RAM_MIRROR_VALID_MAGIC,
 };
 
+// Configure parameters of an UART driver
+static const uart_config_t uart_config = {
+    .baud_rate  = 115200,
+    .data_bits  = UART_DATA_8_BITS,
+    .parity     = UART_PARITY_DISABLE,
+    .stop_bits  = UART_STOP_BITS_1,
+    .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
+    .source_clk = UART_SCLK_DEFAULT,
+};
+
 // Place the ram mirror into RTC RAM. In case of a SW failure we could be able to
 // retrieve the last saved values and store them in NVS.
 RTC_DATA_ATTR ram_mirror_t rm;
@@ -98,28 +119,16 @@ static void init_serial_print(void)
 {
     xUartSemaphore = xSemaphoreCreateMutex(); // for access to LOGs
 
-    uart_port_t portNum = UART_NUM_0;
-    int tx_pin = GPIO_NUM_1, rx_pin = GPIO_NUM_3;
-
-    /* Configure parameters of an UART driver,
-     * communication pins and install the driver */
-    uart_config_t uart_config = {
-        .baud_rate = 115200,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
-    };
     int intr_alloc_flags = 0;
 
 #if CONFIG_UART_ISR_IN_IRAM
     intr_alloc_flags = ESP_INTR_FLAG_IRAM;
 #endif
 
-    ESP_ERROR_CHECK(uart_driver_install(portNum, MAX_LOG_LEN /*not needed?*/, 0, 0, NULL, intr_alloc_flags));
-    ESP_ERROR_CHECK(uart_param_config(portNum, &uart_config));
-    ESP_ERROR_CHECK(uart_set_pin(portNum, tx_pin, rx_pin, GPIO_NUM_NC, GPIO_NUM_NC));
+    /* install the driver */
+    ESP_ERROR_CHECK(uart_driver_install(LOGGING_UART_PORT, MAX_LOG_LEN /*not needed?*/, 0, 0, NULL, intr_alloc_flags));
+    ESP_ERROR_CHECK(uart_param_config(LOGGING_UART_PORT, &uart_config));
+    ESP_ERROR_CHECK(uart_set_pin(LOGGING_UART_PORT, LOGGING_UART_TX, LOGGING_UART_RX, GPIO_NUM_NC, GPIO_NUM_NC));
 }
 
 #if SET_NVS_DEFAULTS == 0
@@ -448,22 +457,6 @@ void handle_power_bad(void)
 void PWR_Task(void *parameter)
 {
     uint32_t ulNotifiedValue;
-
-    static const gpio_num_t pwr_good_io = POWER_GOOD_IO;
-    static const gpio_num_t usr_btn_io = USR_BUTTON_IO;
-
-    // Setup power good IO as external interrupt
-    gpio_set_direction(POWER_GOOD_IO, GPIO_MODE_INPUT);
-    gpio_set_intr_type(POWER_GOOD_IO, GPIO_INTR_NEGEDGE);
-
-    // Setup button IO as external interrupt
-    gpio_set_direction(USR_BUTTON_IO, GPIO_MODE_INPUT);
-    gpio_set_intr_type(USR_BUTTON_IO, GPIO_INTR_ANYEDGE);
-
-    gpio_install_isr_service(0);
-    gpio_isr_handler_add(USR_BUTTON_IO, gpio_interrupt_handler, &usr_btn_io);
-    gpio_isr_handler_add(POWER_GOOD_IO, gpio_interrupt_handler, &pwr_good_io);
-
     while(1)
     {
 
@@ -478,9 +471,23 @@ void PWR_Task(void *parameter)
 
 void app_main(void)
 {
+    static gpio_num_t pwr_good_io = POWER_GOOD_IO;
+    static gpio_num_t usr_btn_io = USR_BUTTON_IO;
     esp_reset_reason_t reason = esp_reset_reason();
+
     init_serial_print();
+
+    // Setup power good IO as external interrupt
     gpio_set_direction(POWER_GOOD_IO, GPIO_MODE_INPUT);
+    gpio_set_intr_type(POWER_GOOD_IO, GPIO_INTR_NEGEDGE);
+
+    // Setup button IO as external interrupt
+    gpio_set_direction(USR_BUTTON_IO, GPIO_MODE_INPUT);
+    gpio_set_intr_type(USR_BUTTON_IO, GPIO_INTR_ANYEDGE);
+
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(USR_BUTTON_IO, gpio_interrupt_handler, (void*)&usr_btn_io);
+    gpio_isr_handler_add(POWER_GOOD_IO, gpio_interrupt_handler, (void*)&pwr_good_io);
 
     esp_pm_config_t pm_config = {
         .light_sleep_enable = true,
@@ -497,47 +504,11 @@ void app_main(void)
         PRINT_LOG("Error (%s) while handling NVS!", esp_err_to_name(err));
     }
 
-    SETUP_QUEUE(NEO6M, QUEUE_LEN_GENERAL);
     SETUP_QUEUE(TIMEKEEP, QUEUE_LEN_GENERAL);
     SETUP_QUEUE(LCD, QUEUE_LEN_GENERAL);
 
-    taskHandleNEO6M = xTaskCreateStatic(
-        neo6M_Task,
-        "neo6M",
-        STACKSIZE_NEO6M,
-        NULL,
-        TASK_PRIO_NEO6M,
-        taskStackNEO6M,
-        &taskBufferNEO6M
-    );
-
-    taskHandleTIMEKEEP = xTaskCreateStatic(
-        timekeep_Task,
-        "timekeep",
-        STACKSIZE_TIMEKEEP,
-        NULL,
-        TASK_PRIO_TIMEKEEP,
-        taskStackTIMEKEEP,
-        &taskBufferTIMEKEEP
-    );
-
-    taskHandleLCD = xTaskCreateStatic(
-        LCD_Task,
-        "LCD",
-        STACKSIZE_LCD,
-        NULL,
-        TASK_PRIO_LCD,
-        taskStackLCD,
-        &taskBufferLCD
-    );
-
-    taskHandlePWR = xTaskCreateStatic(
-        PWR_Task,
-        "PWR",
-        STACKSIZE_PWR,
-        NULL,
-        TASK_PRIO_PWR,
-        taskStackPWR,
-        &taskBufferPWR
-    );
+    taskHandleNEO6M     = CREATE_TASK_STATIC(NEO6M);
+    taskHandleTIMEKEEP  = CREATE_TASK_STATIC(TIMEKEEP);
+    taskHandleLCD       = CREATE_TASK_STATIC(LCD);
+    taskHandlePWR       = CREATE_TASK_STATIC(PWR);
 }

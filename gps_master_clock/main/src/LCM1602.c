@@ -338,7 +338,7 @@ void LCD_I2C_noAutoscroll(void)
 }
 
 // Write to CGRAM of new characters
-void LCD_I2C_createChar(uint8_t location, uint8_t charmap[])
+void LCD_I2C_createChar(uint8_t location, const uint8_t charmap[])
 {
    location &= 0x7; // we only have 8 locations 0-7
 
