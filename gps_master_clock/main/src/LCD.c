@@ -17,7 +17,9 @@
 // '13:08:00 15.11.2025 DST: 0    ' = 26 chars + 4 spaces + 1 null
 #define MAX_TIME_PRINT_LEN 30
 
-#define SHORT_PRESS_DURATION_MS ( 25 / portTICK_PERIOD_MS )
+#define DEBOUNCE_DURATION_MS    ( 50 / portTICK_PERIOD_MS )
+// every press length between DEBOUNCE_DURATION_MS..LONG_PRESS_DURATION_MS is
+// considered a short press
 #define LONG_PRESS_DURATION_MS  ( 500 / portTICK_PERIOD_MS )
 
 
@@ -171,7 +173,7 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
         {
             uint8_t hours = rm.current_minutes_12o_clock / 60;
             uint8_t minutes = rm.current_minutes_12o_clock % 60;
-            snprintf(scratch_buff, sizeof(scratch_buff), "Clock:     %02u:%02u", hours, minutes);
+            snprintf(scratch_buff, sizeof(scratch_buff), "Clock:    %02u:%02u", hours, minutes);
             LCD_I2C_print(scratch_buff);
             break;
         }
@@ -185,63 +187,106 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
 //---------------------------------------------------------------------------
 // Global functions
 //---------------------------------------------------------------------------
-
 void btn_handler(bool timer_triggered)
 {
     static task_msg_t msg = {.dst = TASK_LCD };
     static uint8_t btn_state = BTN_NO_PRESS;
 
-    static const uint32_t timer_periods[NUM_BTN_STATES] =
-    {
-        [BTN_NO_PRESS]      = 0,
-        [BTN_DEBOUNCE]      = SHORT_PRESS_DURATION_MS,
-        [BTN_SHORT_PRESS]   = LONG_PRESS_DURATION_MS,
-        [BTN_LONG_PRESS]    = 0, // do not continue after the long press
-    };
 
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    
-    if (gpio_get_level(USR_BUTTON_IO) == USR_BUTTON_PRESS_LVL)
+    int btn_lvl = gpio_get_level(USR_BUTTON_IO);
+    uint32_t tim_period = 0;
+    bool restart = false;
+
+    switch (btn_state)
     {
-        if (timer_triggered)
-        { // timer triggered handler + still pressed
-            if (btn_state < BTN_LONG_PRESS)
-                btn_state++;
-        }
-        else
-        { // external interrupt triggered handler + button was just pressed
-            btn_state = BTN_DEBOUNCE; // reset state back to start
-        }
-        
-        uint32_t next_period = timer_periods[btn_state];
-        if (next_period == 0)
+        case BTN_NO_PRESS:
         {
-            // nothing to be done currently
+            if (timer_triggered)
+            { // should not happen, only for sanity: must always be called by ISR
+                restart = true;
+            }
+            else
+            {
+                btn_state = BTN_DEBOUNCE; // reset state back to start
+                tim_period = DEBOUNCE_DURATION_MS; // wait for voltage to stabilize
+                gpio_set_intr_type(USR_BUTTON_IO, GPIO_INTR_DISABLE); // ignore any ISR
+            }
+            break;
         }
-        else if (timer_triggered)
+        case BTN_DEBOUNCE:
         {
-            PRINT_LOG("State: %d period: %lu", btn_state, next_period);
-            xTimerChangePeriod(btn_timer, next_period, 1);
+            if (btn_lvl == USR_BUTTON_PRESS_LVL && timer_triggered == true) // check timer state, in case any edge ISR was still pending
+            {
+                btn_state = BTN_SHORT_PRESS;
+                tim_period = LONG_PRESS_DURATION_MS;
+                gpio_set_intr_type(USR_BUTTON_IO, GPIO_INTR_POSEDGE); // await rising edge
+            }
+            else // not yet settled
+            {
+                restart = true;
+            }
+            break;
         }
-        else
+        case BTN_SHORT_PRESS:
         {
-            xTimerChangePeriodFromISR(btn_timer, next_period, &xHigherPriorityTaskWoken);
+            if (btn_lvl == USR_BUTTON_PRESS_LVL && timer_triggered) // still pressed, will be a long press
+            {
+                btn_state = BTN_LONG_PRESS;
+            }
+            else if (timer_triggered == false) // button was released
+            {
+                msg.cmd = TASK_CMD_BTN_PRESS_SHORT;
+                sendTaskMessageISR(&msg);
+                restart = true;
+            }
+            else // some weird intermediate state, abort
+            {
+                restart = true;
+            }
+            break;
+        }
+        case BTN_LONG_PRESS:
+        {
+            if (timer_triggered == false) // was released, dont care about edge
+            {
+                msg.cmd = TASK_CMD_BTN_PRESS_LONG;
+                sendTaskMessageISR(&msg);
+                restart = true;
+            }
+            else // everything else -> error
+            {
+                restart = true;
+            }
+            break;
+        }
+        default:
+        {
+            // unknown state
+            restart = true;
+            break;
         }
     }
-    else if (timer_triggered == false) // released, should come here only via interrupt
+
+    if (restart)
     {
-        if (btn_state == BTN_SHORT_PRESS || btn_state == BTN_LONG_PRESS)
+        if (timer_triggered == false) // if we are in a timer context -> its already stopped
         {
-            msg.cmd = (btn_state == BTN_SHORT_PRESS) ? TASK_CMD_BTN_PRESS_SHORT : TASK_CMD_BTN_PRESS_LONG;
-            sendTaskMessageISR(&msg);                
-        } // else prematurely released, do nothing
-        xTimerStopFromISR(btn_timer, &xHigherPriorityTaskWoken); // make sure the timer is off
-        btn_state = BTN_NO_PRESS; // reset state        
-    }
-    else // released, somehow timer ended here
-    {
-        PRINT_LOG("Released, but timer triggered");
+            xTimerStopFromISR(btn_timer, &xHigherPriorityTaskWoken); // make sure the timer is off
+        }
         btn_state = BTN_NO_PRESS; // reset state
+        gpio_set_intr_type(USR_BUTTON_IO, GPIO_INTR_NEGEDGE);
+    }
+    else if (tim_period)
+    {
+        if(timer_triggered)
+        {
+            xTimerChangePeriod(btn_timer, tim_period, 1);
+        }
+        else
+        {
+            xTimerChangePeriodFromISR(btn_timer, tim_period, &xHigherPriorityTaskWoken);
+        }
     }
 
     if (xHigherPriorityTaskWoken) // check if task switch happened
@@ -272,9 +317,9 @@ void LCD_Task(void *parameter)
     }
 
     btn_timer = xTimerCreate(
-                "btn timer",                    /* Just a text name, not used by the RTOS kernel. */                    
-                SHORT_PRESS_DURATION_MS,   /* The timer period in ticks, must be greater than 0. */
-                pdFALSE,                        /* The timer will not auto-reload themselves when they expire. */
+                "btn timer",            /* Just a text name, not used by the RTOS kernel. */                    
+                DEBOUNCE_DURATION_MS,   /* The timer period in ticks, must be greater than 0. */
+                pdFALSE,                /* The timer will not auto-reload themselves when they expire. */
                 ( void * ) 0,
                 btn_timer_callback
     );

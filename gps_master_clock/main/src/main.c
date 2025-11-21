@@ -483,7 +483,7 @@ void app_main(void)
 
     // Setup button IO as external interrupt
     gpio_set_direction(USR_BUTTON_IO, GPIO_MODE_INPUT);
-    gpio_set_intr_type(USR_BUTTON_IO, GPIO_INTR_ANYEDGE);
+    gpio_set_intr_type(USR_BUTTON_IO, GPIO_INTR_NEGEDGE);
 
     gpio_install_isr_service(0);
     gpio_isr_handler_add(USR_BUTTON_IO, gpio_interrupt_handler, (void*)&usr_btn_io);
