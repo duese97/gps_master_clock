@@ -14,6 +14,8 @@
 
 #define GRAM_BACKSLASH_INDEX 1
 
+#define REFRESH_INTERVAL_MS     ( 500 / portTICK_PERIOD_MS ) 
+
 // '13:08:00 15.11.2025 DST: 0    ' = 26 chars + 4 spaces + 1 null
 #define MAX_TIME_PRINT_LEN 30
 
@@ -21,7 +23,7 @@
 // every press length between DEBOUNCE_DURATION_MS..LONG_PRESS_DURATION_MS is
 // considered a short press
 #define LONG_PRESS_DURATION_MS  ( 500 / portTICK_PERIOD_MS )
-
+#define VERY_LONG_PRESS_DURATION_MS (3000 / portTICK_PERIOD_MS )
 
 //---------------------------------------------------------------------------
 // Enums
@@ -40,13 +42,19 @@ enum
 
 enum
 {
-    BTN_NO_PRESS,
-    BTN_DEBOUNCE,
-    BTN_SHORT_PRESS,
-    BTN_LONG_PRESS,
-    NUM_BTN_STATES
-};
+    MODE_NORMAL,
+    COMM_MENU_SEL_MASTER,
+    COMM_MENU_SEL_SLAVE,
 
+    COMM_MASTER_ADVANCE_WAIT_MIN,
+    COMM_MASTER_ADVANCE_MIN,
+    COMM_MASTER_ADVANCE_WAIT_HOUR,
+    COMM_MASTER_ADVANCE_HOUR,
+
+    COMM_SLAVE_ADVANCE_MIN,
+    COMM_SLAVE_ADVANCE_HOUR,
+    COMM_END,
+};
 
 //---------------------------------------------------------------------------
 // Local constants
@@ -73,7 +81,8 @@ static const uint8_t backslash_charmap[] =
 //---------------------------------------------------------------------------
 
 static TimerHandle_t btn_timer;
-
+static TimerHandle_t refresh_timer;
+static char scratch_buff[NUM_COLUMNS + 1 + 2 /*so that compiler does not complain*/]; // to temporarily format the time etc.
 
 //---------------------------------------------------------------------------
 // Local functions
@@ -85,12 +94,65 @@ static void btn_timer_callback(TimerHandle_t xTimer)
     btn_handler(true);
 }
 
+static void refresh_timer_callback(TimerHandle_t xTimer)
+{
+    (void)xTimer;
+
+    static task_msg_t msg = {.dst = TASK_LCD, .cmd = TASK_CMD_REFRESH_LCD};
+    sendTaskMessage(&msg);
+}
+
+static void LCD_print_commissioning_displays(uint8_t* operating_state)
+{
+    switch(*operating_state)
+    {
+        case COMM_MENU_SEL_MASTER:
+        {
+            LCD_I2C_setCursor(0, 0);
+            LCD_I2C_print("Commissioning   ");
+            LCD_I2C_setCursor(0, 1);
+            LCD_I2C_print(">Master advance ");
+            break;
+        }
+        case COMM_MENU_SEL_SLAVE:
+        {
+            LCD_I2C_setCursor(0, 0);
+            LCD_I2C_print("Commissioning   ");
+            LCD_I2C_setCursor(0, 1);
+            LCD_I2C_print(">Slave advance  ");
+            break;
+        }
+        case COMM_MASTER_ADVANCE_WAIT_MIN:
+        case COMM_MASTER_ADVANCE_WAIT_HOUR:
+        {
+            break;
+        }
+        case COMM_MASTER_ADVANCE_MIN:
+        case COMM_MASTER_ADVANCE_HOUR:
+        {
+            uint8_t hours = rm.current_minutes_12o_clock / 60;
+            uint8_t minutes = rm.current_minutes_12o_clock % 60;
+
+            LCD_I2C_setCursor(0, 0);
+            LCD_I2C_print("Master advance  ");
+            LCD_I2C_setCursor(0, 1);
+            snprintf(scratch_buff, sizeof(scratch_buff), "%02u:%02u           ", hours, minutes);
+            LCD_I2C_print(scratch_buff);
+
+            uint8_t cursor_pos = (*operating_state == COMM_MASTER_ADVANCE_MIN) ? 4 : 1;
+            LCD_I2C_setCursor(cursor_pos, 1);
+            LCD_I2C_blink();
+
+            *operating_state = *operating_state - 1; // set back to waiting
+            break;
+        }
+    }
+}
+
 static void LCD_print_default_displays(char* time_print_buff, int status_screen_idx, GPS_LOCK_STATE_t lock_state_local)
 {
     static int curr_src_start = 0; // index where to start copying from the time buffer
     static int wait_animation_idx = 0;
-
-    char scratch_buff[NUM_COLUMNS + 1 + 1 /*so that compiler does not complain*/]; // to temporarily format the time etc.
 
     // scrolling time value handling
     int overhang = MAX_TIME_PRINT_LEN - (curr_src_start + NUM_COLUMNS);
@@ -173,7 +235,7 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
         {
             uint8_t hours = rm.current_minutes_12o_clock / 60;
             uint8_t minutes = rm.current_minutes_12o_clock % 60;
-            snprintf(scratch_buff, sizeof(scratch_buff), "Clock:    %02u:%02u", hours, minutes);
+            snprintf(scratch_buff, sizeof(scratch_buff), "Clock:     %02u:%02u", hours, minutes);
             LCD_I2C_print(scratch_buff);
             break;
         }
@@ -189,8 +251,7 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
 //---------------------------------------------------------------------------
 void btn_handler(bool timer_triggered)
 {
-    static task_msg_t msg = {.dst = TASK_LCD };
-    static uint8_t btn_state = BTN_NO_PRESS;
+    static task_msg_t msg = {.dst = TASK_LCD, .cmd = TASK_CMD_BTN_PRESS, .btn_state = BTN_NO_PRESS};
 
 
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
@@ -198,7 +259,7 @@ void btn_handler(bool timer_triggered)
     uint32_t tim_period = 0;
     bool restart = false;
 
-    switch (btn_state)
+    switch (msg.btn_state)
     {
         case BTN_NO_PRESS:
         {
@@ -208,7 +269,7 @@ void btn_handler(bool timer_triggered)
             }
             else
             {
-                btn_state = BTN_DEBOUNCE; // reset state back to start
+                msg.btn_state = BTN_DEBOUNCE; // reset state back to start
                 tim_period = DEBOUNCE_DURATION_MS; // wait for voltage to stabilize
                 gpio_set_intr_type(USR_BUTTON_IO, GPIO_INTR_DISABLE); // ignore any ISR
             }
@@ -218,7 +279,7 @@ void btn_handler(bool timer_triggered)
         {
             if (btn_lvl == USR_BUTTON_PRESS_LVL && timer_triggered == true) // check timer state, in case any edge ISR was still pending
             {
-                btn_state = BTN_SHORT_PRESS;
+                msg.btn_state = BTN_SHORT_PRESS;
                 tim_period = LONG_PRESS_DURATION_MS;
                 gpio_set_intr_type(USR_BUTTON_IO, GPIO_INTR_POSEDGE); // await rising edge
             }
@@ -230,13 +291,13 @@ void btn_handler(bool timer_triggered)
         }
         case BTN_SHORT_PRESS:
         {
-            if (btn_lvl == USR_BUTTON_PRESS_LVL && timer_triggered) // still pressed, will be a long press
+            if (btn_lvl == USR_BUTTON_PRESS_LVL && timer_triggered == true) // still pressed, will be a long press
             {
-                btn_state = BTN_LONG_PRESS;
+                msg.btn_state = BTN_LONG_PRESS;
+                tim_period = VERY_LONG_PRESS_DURATION_MS;
             }
             else if (timer_triggered == false) // button was released
             {
-                msg.cmd = TASK_CMD_BTN_PRESS_SHORT;
                 sendTaskMessageISR(&msg);
                 restart = true;
             }
@@ -248,9 +309,25 @@ void btn_handler(bool timer_triggered)
         }
         case BTN_LONG_PRESS:
         {
-            if (timer_triggered == false) // was released, dont care about edge
+            if (btn_lvl == USR_BUTTON_PRESS_LVL && timer_triggered == true) // still pressed, will be a very long press
             {
-                msg.cmd = TASK_CMD_BTN_PRESS_LONG;
+                msg.btn_state = BTN_VERY_LONG_PRESS;
+            }
+            else if (timer_triggered == false) // was released
+            {
+                sendTaskMessageISR(&msg);
+                restart = true;
+            }
+            else // everything else -> error
+            {
+                restart = true;
+            }
+            break;
+        }
+        case BTN_VERY_LONG_PRESS:
+        {
+            if (timer_triggered == false) // was released
+            {
                 sendTaskMessageISR(&msg);
                 restart = true;
             }
@@ -274,7 +351,7 @@ void btn_handler(bool timer_triggered)
         {
             xTimerStopFromISR(btn_timer, &xHigherPriorityTaskWoken); // make sure the timer is off
         }
-        btn_state = BTN_NO_PRESS; // reset state
+        msg.btn_state = BTN_NO_PRESS; // reset state
         gpio_set_intr_type(USR_BUTTON_IO, GPIO_INTR_NEGEDGE);
     }
     else if (tim_period)
@@ -305,6 +382,7 @@ void LCD_Task(void *parameter)
     task_msg_t msg;
     GPS_LOCK_STATE_t lock_state_local = GPS_LOCK_UNINITIALIZED;
     struct tm tm; // local time struct
+    uint8_t operating_state = MODE_NORMAL;
 
     if (LCD_I2C_begin(NUM_COLUMNS, NUM_ROWS) != ESP_OK)
     { // in case no display was found
@@ -323,6 +401,16 @@ void LCD_Task(void *parameter)
                 ( void * ) 0,
                 btn_timer_callback
     );
+
+    refresh_timer = xTimerCreate(
+                "refresh timer",            /* Just a text name, not used by the RTOS kernel. */                    
+                REFRESH_INTERVAL_MS,   /* The timer period in ticks, must be greater than 0. */
+                pdTRUE,                /* The timer will not auto-reload themselves when they expire. */
+                ( void * ) 0,
+                refresh_timer_callback
+    );
+
+    xTimerStart(refresh_timer, 10);
 
     if (use_display)
     {
@@ -385,14 +473,67 @@ void LCD_Task(void *parameter)
                     }
                     break;
                 }
-                case TASK_CMD_BTN_PRESS_LONG:
+                case TASK_CMD_REFRESH_LCD:
                 {
-                    PRINT_LOG("Long btn press");
+                    if (use_display == false)
+                    {
+                        continue;
+                    }
+
+                    if (operating_state == MODE_NORMAL)
+                    {
+                        LCD_print_default_displays(time_print_buff, status_screen_idx, lock_state_local);
+                    }
+                    else
+                    {
+                        LCD_print_commissioning_displays(&operating_state);
+                    }
                     break;
                 }
-                case TASK_CMD_BTN_PRESS_SHORT:
+                case TASK_CMD_BTN_PRESS:
                 {
-                    PRINT_LOG("Short btn press");
+                    char* type = "?";
+                    if (msg.btn_state == BTN_SHORT_PRESS)
+                    {
+                        if (operating_state == COMM_MASTER_ADVANCE_WAIT_HOUR || operating_state == COMM_MASTER_ADVANCE_WAIT_MIN)
+                        {
+                            int step = (operating_state == COMM_MASTER_ADVANCE_WAIT_MIN) ? 1 : 60;
+                            rm.current_minutes_12o_clock += step;
+                            rm.current_minutes_12o_clock %= MINUTES_PER_12H;
+                            operating_state++; // set to execution state
+                        }
+                        else if (operating_state == COMM_SLAVE_ADVANCE_MIN || operating_state == COMM_SLAVE_ADVANCE_HOUR)
+                        {
+                            msg.cmd = (operating_state == COMM_SLAVE_ADVANCE_MIN) ? TASK_CMD_SLAVE_ADVANCE_MINUTE : TASK_CMD_SLAVE_ADVANCE_HOUR;
+                            msg.dst = TASK_TIMEKEEP;
+                            sendTaskMessage(&msg);
+                        }
+                        type = "short";
+                    }
+                    else if (msg.btn_state == BTN_LONG_PRESS)
+                    {
+                        type = "long";
+                    }
+                    else if (msg.btn_state == BTN_VERY_LONG_PRESS)
+                    {
+                        msg.dst = TASK_TIMEKEEP;
+
+                        // toggle between normal and commissioning
+                        if (operating_state == MODE_NORMAL)
+                        {
+                            msg.cmd = TASK_CMD_START_COMMISSIONING;
+                            operating_state = COMM_MASTER_ADVANCE_WAIT_HOUR;
+                        }
+                        else
+                        {
+                            msg.cmd = TASK_CMD_STOP_COMMISSIONING;
+                            operating_state = MODE_NORMAL;
+                        }
+                        sendTaskMessage(&msg);
+                        type = "very long";
+                    }
+
+                    PRINT_LOG("%s press", type);
                     break;
                 }
                 default:
@@ -401,14 +542,5 @@ void LCD_Task(void *parameter)
                 }
             }
         }
-        
-        /* all actions which need to be polled */
-
-        // beyond this point: only LCD related things
-        if (use_display == false)
-        {
-            continue;
-        }
-        LCD_print_default_displays(time_print_buff, status_screen_idx, lock_state_local);
     }
 }

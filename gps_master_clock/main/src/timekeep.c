@@ -9,8 +9,6 @@
 #include "bsp.h"
 
 
-#define MINUTES_PER_12H  (12*60)
-
 // Set timezone for Europe/Berlin (https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv)
 static const char* timezone_europe_berlin = "CET-1CEST,M3.5.0,M10.5.0/3";
 static const char* timezone_gmt = "GMT0";
@@ -100,24 +98,22 @@ void TIMEKEEP_Task(void *parameter)
                     vTaskSuspend(NULL);
                     break;
                 }
+
+                case TASK_CMD_START_COMMISSIONING:
                 case TASK_CMD_STOP_COMMISSIONING:
                 {
+                    commissioning = (msg.cmd == TASK_CMD_START_COMMISSIONING);
                     clock_minutes_diff = 0;
-                    commissioning = false;
                     break;
                 }
-                case TASK_CMD_ADVANCE_MINUTE:
+                case TASK_CMD_SLAVE_ADVANCE_MINUTE:
+                case TASK_CMD_SLAVE_ADVANCE_HOUR:
                 {
-                    // set commissioning flag and force one tick
-                    commissioning = true;
-                    clock_minutes_diff = 1;
-                    break;
-                }
-                case TASK_CMD_ADVANCE_HOUR:
-                {
-                    // set commissioning flag and force one tick
-                    commissioning = true;
-                    clock_minutes_diff = 60;
+                    if (commissioning)
+                    { // force one tick
+                        clock_minutes_diff = (msg.cmd == TASK_CMD_SLAVE_ADVANCE_MINUTE) ? 1 : 60;
+                    }
+                    
                     break;
                 }
                 case TASK_CMD_SECOND_TICK:
@@ -229,10 +225,7 @@ void TIMEKEEP_Task(void *parameter)
             // Set GPIO(s)
             gpio_set_level(GPIO_LED, 0);
             rm.current_minutes_12o_clock++; // one step closer to the target time
-            if (rm.current_minutes_12o_clock >= MINUTES_PER_12H) // keep within 12 hour bounds
-            {
-                rm.current_minutes_12o_clock = 0;
-            }
+            rm.current_minutes_12o_clock %= MINUTES_PER_12H; // keep within 12 hour bounds
             clock_minutes_diff--;
         }
     }

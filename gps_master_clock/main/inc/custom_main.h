@@ -22,6 +22,8 @@
 #define MAX_LOG_WAIT_MS 10              // time to wait for UART to become available
 #define MAX_LOG_LEN 512                 // maximum log message length, includes timestamp + func name
 
+#define MINUTES_PER_12H  (12*60)
+
 // The maximum time in minutes the local clock can lead in minutes, before a wraparound must happen
 #define MAX_LOCAL_CLOCK_LEAD_MINUTES  5
 
@@ -53,12 +55,17 @@ typedef enum
 {
   TASK_CMD_START = 0,
   TASK_CMD_SECOND_TICK = TASK_CMD_START,
+
+  TASK_CMD_START_COMMISSIONING,
   TASK_CMD_STOP_COMMISSIONING,
-  TASK_CMD_ADVANCE_MINUTE,
-  TASK_CMD_ADVANCE_HOUR,
+
+  TASK_CMD_SLAVE_ADVANCE_MINUTE,
+  TASK_CMD_SLAVE_ADVANCE_HOUR,
+
   TASK_CMD_GPS_LOCK_STATE,
-  TASK_CMD_BTN_PRESS_SHORT,
-  TASK_CMD_BTN_PRESS_LONG,
+  TASK_CMD_BTN_PRESS,
+  TASK_CMD_REFRESH_LCD,
+  
   TASK_CMD_LOCAL_TIME,
   TASK_CMD_SHUTDOWN,
   NUM_TASK_CMD
@@ -70,6 +77,15 @@ typedef enum
     GPS_LOCK_LOST, // no communication (with module) possible
     GPS_LOCKED, // GPS signal received
 } GPS_LOCK_STATE_t;
+
+typedef enum
+{
+    BTN_NO_PRESS,
+    BTN_DEBOUNCE,
+    BTN_SHORT_PRESS,
+    BTN_LONG_PRESS,
+    BTN_VERY_LONG_PRESS,
+}btn_state_t;
 
 //---------------------------------------------------------------------------
 // Types
@@ -83,6 +99,7 @@ typedef struct
     time_t utc_time;
     GPS_LOCK_STATE_t lock_state;
     struct tm local_time;
+    btn_state_t btn_state;
   };
 } task_msg_t;
 
