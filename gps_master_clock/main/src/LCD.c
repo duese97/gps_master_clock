@@ -40,21 +40,6 @@ enum
     NUM_STATUS_IDX
 };
 
-enum
-{
-    MODE_NORMAL,
-    COMM_MENU_SEL_MASTER,
-    COMM_MENU_SEL_SLAVE,
-
-    COMM_MASTER_ADVANCE_WAIT_MIN,
-    COMM_MASTER_ADVANCE_MIN,
-    COMM_MASTER_ADVANCE_WAIT_HOUR,
-    COMM_MASTER_ADVANCE_HOUR,
-
-    COMM_SLAVE_ADVANCE_MIN,
-    COMM_SLAVE_ADVANCE_HOUR,
-    COMM_END,
-};
 
 //---------------------------------------------------------------------------
 // Local constants
@@ -102,53 +87,6 @@ static void refresh_timer_callback(TimerHandle_t xTimer)
     sendTaskMessage(&msg);
 }
 
-static void LCD_print_commissioning_displays(uint8_t* operating_state)
-{
-    switch(*operating_state)
-    {
-        case COMM_MENU_SEL_MASTER:
-        {
-            LCD_I2C_setCursor(0, 0);
-            LCD_I2C_print("Commissioning   ");
-            LCD_I2C_setCursor(0, 1);
-            LCD_I2C_print(">Master advance ");
-            break;
-        }
-        case COMM_MENU_SEL_SLAVE:
-        {
-            LCD_I2C_setCursor(0, 0);
-            LCD_I2C_print("Commissioning   ");
-            LCD_I2C_setCursor(0, 1);
-            LCD_I2C_print(">Slave advance  ");
-            break;
-        }
-        case COMM_MASTER_ADVANCE_WAIT_MIN:
-        case COMM_MASTER_ADVANCE_WAIT_HOUR:
-        {
-            break;
-        }
-        case COMM_MASTER_ADVANCE_MIN:
-        case COMM_MASTER_ADVANCE_HOUR:
-        {
-            uint8_t hours = rm.current_minutes_12o_clock / 60;
-            uint8_t minutes = rm.current_minutes_12o_clock % 60;
-
-            LCD_I2C_setCursor(0, 0);
-            LCD_I2C_print("Master advance  ");
-            LCD_I2C_setCursor(0, 1);
-            snprintf(scratch_buff, sizeof(scratch_buff), "%02u:%02u           ", hours, minutes);
-            LCD_I2C_print(scratch_buff);
-
-            uint8_t cursor_pos = (*operating_state == COMM_MASTER_ADVANCE_MIN) ? 4 : 1;
-            LCD_I2C_setCursor(cursor_pos, 1);
-            LCD_I2C_blink();
-
-            *operating_state = *operating_state - 1; // set back to waiting
-            break;
-        }
-    }
-}
-
 static void LCD_print_default_displays(char* time_print_buff, int status_screen_idx, GPS_LOCK_STATE_t lock_state_local)
 {
     static int curr_src_start = 0; // index where to start copying from the time buffer
@@ -189,8 +127,7 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
             }
             else
             {
-                snprintf(scratch_buff, sizeof(scratch_buff), "Await GPS lock %c", wait_animation[wait_animation_idx]);
-                LCD_I2C_print(scratch_buff);
+                LCD_I2C_printf(scratch_buff, "Await GPS lock %c", wait_animation[wait_animation_idx]);
 
                 wait_animation_idx++;
                 if (wait_animation_idx >= ARRAY_LEN(wait_animation))
@@ -200,14 +137,12 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
         }
         case STATUS_CORRECTION_POS:
         {
-            snprintf(scratch_buff, sizeof(scratch_buff), "Lag:   %8lus", rm.total_pos_time_corrected);
-            LCD_I2C_print(scratch_buff);
+            LCD_I2C_printf("Lag:   %8lus", rm.total_pos_time_corrected);
             break;
         }
         case STATUS_CORRECTION_NEG:
         {
-            snprintf(scratch_buff, sizeof(scratch_buff), "Lead:  %8lus", rm.total_neg_time_corrected);
-            LCD_I2C_print(scratch_buff);
+            LCD_I2C_printf("Lead:  %8lus", rm.total_neg_time_corrected);
             break;
         }
         case STATUS_TOTAL_UPTIME:
@@ -227,16 +162,14 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
                     uptime_unit = 'h';
                 }
             }
-            snprintf(scratch_buff, sizeof(scratch_buff), "Uptime %8lu%c", uptime_val, uptime_unit);
-            LCD_I2C_print(scratch_buff);
+            LCD_I2C_printf("Uptime %8lu%c", uptime_val, uptime_unit);
             break;
         }
         case STATUS_CLOCK_FACE_TIME:
         {
             uint8_t hours = rm.current_minutes_12o_clock / 60;
             uint8_t minutes = rm.current_minutes_12o_clock % 60;
-            snprintf(scratch_buff, sizeof(scratch_buff), "Clock:     %02u:%02u", hours, minutes);
-            LCD_I2C_print(scratch_buff);
+            LCD_I2C_printf("Clock:     %02u:%02u", hours, minutes);
             break;
         }
         default:
@@ -382,7 +315,7 @@ void LCD_Task(void *parameter)
     task_msg_t msg;
     GPS_LOCK_STATE_t lock_state_local = GPS_LOCK_UNINITIALIZED;
     struct tm tm; // local time struct
-    uint8_t operating_state = MODE_NORMAL;
+    bool is_commissioning = false;
 
     if (LCD_I2C_begin(NUM_COLUMNS, NUM_ROWS) != ESP_OK)
     { // in case no display was found
@@ -480,13 +413,13 @@ void LCD_Task(void *parameter)
                         continue;
                     }
 
-                    if (operating_state == MODE_NORMAL)
+                    if (is_commissioning == false)
                     {
                         LCD_print_default_displays(time_print_buff, status_screen_idx, lock_state_local);
                     }
                     else
                     {
-                        LCD_print_commissioning_displays(&operating_state);
+                        
                     }
                     break;
                 }
@@ -495,19 +428,6 @@ void LCD_Task(void *parameter)
                     char* type = "?";
                     if (msg.btn_state == BTN_SHORT_PRESS)
                     {
-                        if (operating_state == COMM_MASTER_ADVANCE_WAIT_HOUR || operating_state == COMM_MASTER_ADVANCE_WAIT_MIN)
-                        {
-                            int step = (operating_state == COMM_MASTER_ADVANCE_WAIT_MIN) ? 1 : 60;
-                            rm.current_minutes_12o_clock += step;
-                            rm.current_minutes_12o_clock %= MINUTES_PER_12H;
-                            operating_state++; // set to execution state
-                        }
-                        else if (operating_state == COMM_SLAVE_ADVANCE_MIN || operating_state == COMM_SLAVE_ADVANCE_HOUR)
-                        {
-                            msg.cmd = (operating_state == COMM_SLAVE_ADVANCE_MIN) ? TASK_CMD_SLAVE_ADVANCE_MINUTE : TASK_CMD_SLAVE_ADVANCE_HOUR;
-                            msg.dst = TASK_TIMEKEEP;
-                            sendTaskMessage(&msg);
-                        }
                         type = "short";
                     }
                     else if (msg.btn_state == BTN_LONG_PRESS)
@@ -516,20 +436,6 @@ void LCD_Task(void *parameter)
                     }
                     else if (msg.btn_state == BTN_VERY_LONG_PRESS)
                     {
-                        msg.dst = TASK_TIMEKEEP;
-
-                        // toggle between normal and commissioning
-                        if (operating_state == MODE_NORMAL)
-                        {
-                            msg.cmd = TASK_CMD_START_COMMISSIONING;
-                            operating_state = COMM_MASTER_ADVANCE_WAIT_HOUR;
-                        }
-                        else
-                        {
-                            msg.cmd = TASK_CMD_STOP_COMMISSIONING;
-                            operating_state = MODE_NORMAL;
-                        }
-                        sendTaskMessage(&msg);
                         type = "very long";
                     }
 
