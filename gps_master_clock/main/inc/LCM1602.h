@@ -80,6 +80,7 @@
 
 esp_err_t LCD_I2C_begin(uint8_t cols, uint8_t lines);
 esp_err_t LCD_I2C_print(const char* str);
+esp_err_t LCD_I2C_printf(const char *fmt, ...);
 
 void LCD_I2C_clear();
 void LCD_I2C_home();

@@ -59,8 +59,7 @@ typedef enum
   TASK_CMD_START_COMMISSIONING,
   TASK_CMD_STOP_COMMISSIONING,
 
-  TASK_CMD_SLAVE_ADVANCE_MINUTE,
-  TASK_CMD_SLAVE_ADVANCE_HOUR,
+  TASK_CMD_SLAVE_ADVANCE_MINUTES,
 
   TASK_CMD_GPS_LOCK_STATE,
   TASK_CMD_BTN_PRESS,
@@ -100,6 +99,7 @@ typedef struct
     GPS_LOCK_STATE_t lock_state;
     struct tm local_time;
     btn_state_t btn_state;
+    uint8_t slave_advance_minutes;
   };
 } task_msg_t;
 

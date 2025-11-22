@@ -106,12 +106,11 @@ void TIMEKEEP_Task(void *parameter)
                     clock_minutes_diff = 0;
                     break;
                 }
-                case TASK_CMD_SLAVE_ADVANCE_MINUTE:
-                case TASK_CMD_SLAVE_ADVANCE_HOUR:
+                case TASK_CMD_SLAVE_ADVANCE_MINUTES:
                 {
                     if (commissioning)
                     { // force one tick
-                        clock_minutes_diff = (msg.cmd == TASK_CMD_SLAVE_ADVANCE_MINUTE) ? 1 : 60;
+                        clock_minutes_diff = msg.slave_advance_minutes;
                     }
                     
                     break;

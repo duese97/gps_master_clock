@@ -214,6 +214,17 @@ esp_err_t LCD_I2C_print(const char *str)
    return err;
 }
 
+esp_err_t LCD_I2C_printf(const char *fmt, ...)
+{
+   char scratchbuf[_cols + 1];
+   va_list args;
+   va_start(args, fmt);
+   vsnprintf(scratchbuf, _cols + 1, fmt, args);
+   va_end(args);
+
+   return LCD_I2C_print(scratchbuf);
+}
+
 void LCD_I2C_clear()
 {
    command(LCD_CLEARDISPLAY);     // clear display, set cursor position to zero
