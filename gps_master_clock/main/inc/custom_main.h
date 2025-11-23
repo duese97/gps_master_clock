@@ -124,6 +124,12 @@ typedef struct
 
 } ram_mirror_t;
 
+// global shared RAM data, which is not persisted
+typedef struct
+{
+  int clock_minutes_diff; // difference to correct time
+} ram_shared_t;
+
 //---------------------------------------------------------------------------
 // Exported var/func
 //---------------------------------------------------------------------------
@@ -132,7 +138,7 @@ typedef struct
 extern SemaphoreHandle_t xUartSemaphore;
 extern char print_buf[MAX_LOG_LEN];
 
-extern ram_mirror_t rm;
+extern ram_mirror_t ram_mirror;
 
 /* exported functions */
 void serial_print_custom(void);

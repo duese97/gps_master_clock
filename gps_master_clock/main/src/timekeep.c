@@ -28,8 +28,8 @@ static void print_stats(void)
         "\tTotal corrected: pos:%lus neg:%lus\n"
         "\tUptime: %lus = %luh = %lud",
         esp_get_free_heap_size(), esp_get_minimum_free_heap_size(),
-        rm.total_pos_time_corrected, rm.total_neg_time_corrected,
-        rm.total_uptime_seconds, rm.total_uptime_seconds / 3600, rm.total_uptime_seconds / (3600 * 24)
+        ram_mirror.total_pos_time_corrected, ram_mirror.total_neg_time_corrected,
+        ram_mirror.total_uptime_seconds, ram_mirror.total_uptime_seconds / 3600, ram_mirror.total_uptime_seconds / (3600 * 24)
     );
     uint8_t curr_num_tasks = uxTaskGetNumberOfTasks();
     if (last_num_tasks != curr_num_tasks)
@@ -108,14 +108,14 @@ void TIMEKEEP_Task(void *parameter)
                 case TASK_CMD_SLAVE_ADVANCE_MINUTES:
                 {
                     if (commissioning)
-                        clock_minutes_diff = msg.slave_advance_minutes;
+                        clock_minutes_diff += msg.slave_advance_minutes;
                     
                     break;
                 }
                 case TASK_CMD_SECOND_TICK:
                 {
-                    rm.total_uptime_seconds++;
-                    if (rm.total_uptime_seconds % 60 == 0)
+                    ram_mirror.total_uptime_seconds++;
+                    if (ram_mirror.total_uptime_seconds % 60 == 0)
                     {
                         print_stats();
                     }
@@ -165,7 +165,7 @@ void TIMEKEEP_Task(void *parameter)
                     int target_minutes_12o_clock = target_local_time.tm_hour * 60 + target_local_time.tm_min;
 
                     // determine the current difference
-                    clock_minutes_diff = target_minutes_12o_clock - rm.current_minutes_12o_clock;
+                    clock_minutes_diff = target_minutes_12o_clock - ram_mirror.current_minutes_12o_clock;
                     clock_minutes_diff = clock_minutes_diff % MINUTES_PER_12H;
 
                     if (clock_minutes_diff > 0)
@@ -196,7 +196,7 @@ void TIMEKEEP_Task(void *parameter)
                     }
 
                     PRINT_LOG("%02d:%02d -> %d minutes time difference to target -> %02d:%02d(%02d:%02d)",
-                        rm.current_minutes_12o_clock / 60, rm.current_minutes_12o_clock % 60,
+                        ram_mirror.current_minutes_12o_clock / 60, ram_mirror.current_minutes_12o_clock % 60,
                         clock_minutes_diff,
                         target_local_time.tm_hour % 12, target_local_time.tm_min,
                         target_local_time.tm_hour, target_local_time.tm_min);
@@ -213,15 +213,15 @@ void TIMEKEEP_Task(void *parameter)
         { // if we come here: do clock pulses
             // set GPIO(s)
             gpio_set_level(GPIO_LED, 0);
-            vTaskDelay(rm.pulse_len_ms / portTICK_PERIOD_MS);
+            vTaskDelay(ram_mirror.pulse_len_ms / portTICK_PERIOD_MS);
             // set GPIO(s)
             gpio_set_level(GPIO_LED, 1);
-            vTaskDelay(rm.pulse_pause_ms / portTICK_PERIOD_MS);
+            vTaskDelay(ram_mirror.pulse_pause_ms / portTICK_PERIOD_MS);
 
             // Set GPIO(s)
             gpio_set_level(GPIO_LED, 0);
-            rm.current_minutes_12o_clock++; // one step closer to the target time
-            rm.current_minutes_12o_clock %= MINUTES_PER_12H; // keep within 12 hour bounds
+            ram_mirror.current_minutes_12o_clock++; // one step closer to the target time
+            ram_mirror.current_minutes_12o_clock %= MINUTES_PER_12H; // keep within 12 hour bounds
             clock_minutes_diff--;
         }
     }

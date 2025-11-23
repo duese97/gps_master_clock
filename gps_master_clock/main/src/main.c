@@ -94,7 +94,7 @@ SemaphoreHandle_t xUartSemaphore;
 char print_buf[MAX_LOG_LEN];
 
 // default values
-static const ram_mirror_t rm_dflt =
+static const ram_mirror_t ram_mirror_default =
 {
     .pulse_len_ms = 100,
     .pulse_pause_ms = 100,
@@ -113,7 +113,7 @@ static const uart_config_t uart_config = {
 
 // Place the ram mirror into RTC RAM. In case of a SW failure we could be able to
 // retrieve the last saved values and store them in NVS.
-RTC_DATA_ATTR ram_mirror_t rm;
+RTC_DATA_ATTR ram_mirror_t ram_mirror;
 
 static void init_serial_print(void)
 {
@@ -135,7 +135,7 @@ static void init_serial_print(void)
 static esp_err_t load_nvs_data(nvs_handle_t nvs_handle)
 {
     size_t value_len = sizeof(ram_mirror_t);
-    esp_err_t err = nvs_get_blob(nvs_handle, KEY_RAM_MIRROR, (void *)&rm, &value_len);
+    esp_err_t err = nvs_get_blob(nvs_handle, KEY_RAM_MIRROR, (void *)&ram_mirror, &value_len);
     if (err != ESP_OK)
     {
         PRINT_LOG("Unable to obtain data, error: %d", err);
@@ -147,8 +147,8 @@ static esp_err_t load_nvs_data(nvs_handle_t nvs_handle)
 static esp_err_t save_nvs_data(nvs_handle_t nvs_handle)
 {
     size_t value_len = sizeof(ram_mirror_t);
-    rm.mirror_saved_times++;
-    esp_err_t err = nvs_set_blob(nvs_handle, KEY_RAM_MIRROR, (void *)&rm, value_len);
+    ram_mirror.mirror_saved_times++;
+    esp_err_t err = nvs_set_blob(nvs_handle, KEY_RAM_MIRROR, (void *)&ram_mirror, value_len);
     if (err == ESP_OK)
     {
         err = nvs_commit(nvs_handle);
@@ -159,7 +159,7 @@ static esp_err_t save_nvs_data(nvs_handle_t nvs_handle)
     }
     else
     {
-        PRINT_LOG("Performed store #%lu", rm.mirror_saved_times);
+        PRINT_LOG("Performed store #%lu", ram_mirror.mirror_saved_times);
     }
     return err;
 }
@@ -196,7 +196,7 @@ static esp_err_t inital_nvs_load(bool soft_reset)
         // Check if the RAM mirror can be used
         if (soft_reset)
         { // there is hope to load a valid ram mirror
-            if (rm.magic_word == RAM_MIRROR_VALID_MAGIC)
+            if (ram_mirror.magic_word == RAM_MIRROR_VALID_MAGIC)
             { // back up the data, in case a future power cycle happens
                 err = save_nvs_data(nvs_handle);
                 PRINT_LOG("Trying to save valid RAM mirror to NVS...");
@@ -217,10 +217,10 @@ static esp_err_t inital_nvs_load(bool soft_reset)
     
         if (err == ESP_OK)
         {
-            if (loaded_from_nvs && rm.magic_word != RAM_MIRROR_VALID_MAGIC) // load worked, but somehow got garbage
+            if (loaded_from_nvs && ram_mirror.magic_word != RAM_MIRROR_VALID_MAGIC) // load worked, but somehow got garbage
             {
                 err = ESP_ERR_INVALID_CRC;
-                PRINT_LOG("Unexpected magic word in loaded data: %08lX", rm.magic_word);
+                PRINT_LOG("Unexpected magic word in loaded data: %08lX", ram_mirror.magic_word);
             }
         }
         else if (loaded_from_nvs)
@@ -233,7 +233,7 @@ static esp_err_t inital_nvs_load(bool soft_reset)
 #endif // SET_NVS_DEFAULTS == 0
     {
         PRINT_LOG("Re-initializing NVS...");
-        rm = rm_dflt;
+        ram_mirror = ram_mirror_default;
         err = save_nvs_data(nvs_handle);
         if (err == ESP_OK)
         {
@@ -251,11 +251,11 @@ static esp_err_t inital_nvs_load(bool soft_reset)
         "\tmirror_saved_times: %lu\n"
         "\tpulse_len_ms: %u pulse_pause_ms: %u\n"
         "\tlast_connected_utc:%lld",
-        rm.current_minutes_12o_clock, rm.current_minutes_12o_clock / 60, rm.current_minutes_12o_clock % 60,
-        rm.total_pos_time_corrected, rm.total_neg_time_corrected,
-        rm.mirror_saved_times,
-        rm.pulse_len_ms, rm.pulse_pause_ms,
-        rm.last_connected_utc
+        ram_mirror.current_minutes_12o_clock, ram_mirror.current_minutes_12o_clock / 60, ram_mirror.current_minutes_12o_clock % 60,
+        ram_mirror.total_pos_time_corrected, ram_mirror.total_neg_time_corrected,
+        ram_mirror.mirror_saved_times,
+        ram_mirror.pulse_len_ms, ram_mirror.pulse_pause_ms,
+        ram_mirror.last_connected_utc
     );
 
     PRINT_LOG("Closing NVS");

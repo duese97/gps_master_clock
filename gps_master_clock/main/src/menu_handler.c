@@ -63,12 +63,12 @@ static uint8_t curr_sub_menu_idx = 0;
 static void master_advance_fn(val_union_t val)
 {
     // increment the minutes as desired
-    rm.current_minutes_12o_clock += val.u32;
-    rm.current_minutes_12o_clock %= MINUTES_PER_12H;
+    ram_mirror.current_minutes_12o_clock += val.u32;
+    ram_mirror.current_minutes_12o_clock %= MINUTES_PER_12H;
 
     // get current configured advanced time
-    uint8_t hours = rm.current_minutes_12o_clock / 60;
-    uint8_t minutes = rm.current_minutes_12o_clock % 60;
+    uint8_t hours = ram_mirror.current_minutes_12o_clock / 60;
+    uint8_t minutes = ram_mirror.current_minutes_12o_clock % 60;
 
     // print it
     LCD_I2C_setCursor(0, 0);
@@ -87,13 +87,6 @@ static void slave_advance_fn(val_union_t val)
 }
 static void slave_advance_update(void)
 {
-    // get current configured advanced time
-    uint8_t hours = rm.current_minutes_12o_clock / 60;
-    uint8_t minutes = rm.current_minutes_12o_clock % 60;
-
-    // print it
-    LCD_I2C_setCursor(0, 0);
-    LCD_I2C_printf("      %02u:%02u     ", hours, minutes);
 }
 
 static void factory_reset_submenu_set(val_union_t val)
@@ -104,22 +97,22 @@ static void factory_reset_submenu_set(val_union_t val)
 static const submenu_elem_t master_advance_submenu_elems[] =
 {
     {
-        .selector_str = ">exit  +1m  +1h "
+        .selector_str = ">exit  +1m  +1h"
     },
     {
-        .selector_str = " exit >+1m  +1h ",
+        .selector_str = " exit >+1m  +1h",
         .modifier_fn = master_advance_fn,
         .fn_param.u32 = 1,
     },
     {
-        .selector_str = " exit  +1m >+1h ",
+        .selector_str = " exit  +1m >+1h",
         .modifier_fn = master_advance_fn,
         .fn_param.u32 = 60,
     },
 };
 static const submenu_t master_advance_submenu =
 {
-    .submenu_initial_title_str = "Master advance  ",
+    .submenu_initial_title_str = "Master advance",
     .num_submenu_elem = ARRAY_LEN(master_advance_submenu_elems),
     .submenu_elems = master_advance_submenu_elems,
 };
@@ -128,16 +121,16 @@ static const submenu_t master_advance_submenu =
 static const submenu_elem_t slave_advance_submenu_elems[] =
 {
     {
-        .selector_str = ">exit  +1m  +1h "
+        .selector_str = ">exit  +1m  +1h"
     },
     {
-        .selector_str = " exit >+1m  +1h ",
+        .selector_str = " exit >+1m  +1h",
         .fn_param.u32 = 1,
         .modifier_fn = slave_advance_fn,
         .update_fn = slave_advance_update,
     },
     {
-        .selector_str = " exit  +1m >+1h ",
+        .selector_str = " exit  +1m >+1h",
         .fn_param.u32 = 60,
         .modifier_fn = slave_advance_fn,
         .update_fn = slave_advance_update,
@@ -145,7 +138,7 @@ static const submenu_elem_t slave_advance_submenu_elems[] =
 };
 static const submenu_t slave_advance_submenu =
 {
-    .submenu_initial_title_str = "Slave advance   ",
+    .submenu_initial_title_str = "Slave advance",
     .num_submenu_elem = ARRAY_LEN(slave_advance_submenu_elems),
     .submenu_elems = slave_advance_submenu_elems,
 };
@@ -173,21 +166,21 @@ static const main_menu_t main_menu[] =
 {
     [MENU_SEL_EXIT] =
     {
-        .selector_str = ">Exit           "
+        .selector_str = ">Exit"
     },
     [MENU_SEL_MASTER_ADVANCE] = 
     {
-        .selector_str = ">Master advance ",
+        .selector_str = ">Master advance",
         .submenu_ptr = &master_advance_submenu,
     },
     [MENU_SEL_SLAVE_ADVANCE] =
     {
-        .selector_str = ">Slave advance  ",
+        .selector_str = ">Slave advance",
         .submenu_ptr = &slave_advance_submenu,
     },
     [MENU_SEL_FULL_RESET] =
     {
-        .selector_str =  ">FULL RESET    ",
+        .selector_str =  ">FULL RESET",
         .submenu_ptr = &factory_reset_submenu,
     },
 };
@@ -197,18 +190,54 @@ static void print_topmenu(void)
     LCD_I2C_setCursor(0, 0);
     LCD_I2C_print("******MENU******");
     LCD_I2C_setCursor(0, 1);
-    LCD_I2C_print(main_ptr->selector_str);
+    LCD_I2C_printf("%-16s", main_ptr->selector_str);
 }
 
-void menu_update(void)
+static void change_selector(const char* selector_str, bool force_set)
 {
-    if (menu_state != MENU_STATE_SEL_SUB || sub_ptr == NULL) // can only update when in submenu
+    static bool show_selector;
+
+    if (force_set)
+    {
+        show_selector = true;
+    }
+    else
+    {
+        show_selector = !show_selector; // prepare next toggle
+    }
+    
+    char* found = strchr(selector_str, '>'); // look for current pos
+    if (found == false) // check if it is even in the string
     {
         return;
     }
 
-    // get submenu element, check if update function is presen
+    // check where we currently are, calculate index
+    LCD_I2C_setCursor(found - selector_str, 1);
+
+    // only need to alter the 'cursor', rest of the shown string can remain untouched
+    char* toggle_char = show_selector ? ">" : " ";
+    LCD_I2C_print(toggle_char);
+}
+
+void menu_update(void)
+{
+    // updating only makes sense, when in submenu
+    if (sub_ptr == NULL)
+    { // sanity check
+        return;
+    }
+
+    // get submenu element
     const submenu_elem_t* elem = sub_ptr->submenu_elems + curr_sub_menu_idx;
+    
+    // add a blinking effect to the 'cursor' as soon as modification is started
+    if (menu_state == MENU_STATE_MODIFY_VALUE)
+    {
+        change_selector(elem->selector_str, false /*no force*/);
+    }
+
+    // check if update function is present
     if (elem->update_fn == NULL)
     {
         return;
@@ -216,7 +245,7 @@ void menu_update(void)
     elem->update_fn();
 }
 
-bool menu_statemachine(btn_state_t btn_state, bool* comm_changed)
+bool menu_statemachine(btn_state_t btn_state, bool* menu_changed)
 {    
     switch(menu_state)
     {
@@ -229,7 +258,7 @@ bool menu_statemachine(btn_state_t btn_state, bool* comm_changed)
                 curr_sub_menu_idx = 0;
 
                 main_ptr = main_menu;
-                *comm_changed = true;
+                *menu_changed = true;
                 print_topmenu();
             }
             break;
@@ -242,7 +271,7 @@ bool menu_statemachine(btn_state_t btn_state, bool* comm_changed)
                 {
                     menu_state = MENU_STATE_SEL_NONE;
                     LCD_I2C_clear(); // cleanup in any case
-                    *comm_changed = true;
+                    *menu_changed = true;
                 }
                 else
                 {
@@ -253,9 +282,9 @@ bool menu_statemachine(btn_state_t btn_state, bool* comm_changed)
     
                     // Only needed once: Title of submenu
                     LCD_I2C_setCursor(0, 0);
-                    LCD_I2C_print(sub_ptr->submenu_initial_title_str);
+                    LCD_I2C_printf("%-16s", sub_ptr->submenu_initial_title_str);
                     LCD_I2C_setCursor(0, 1);
-                    LCD_I2C_print(sub_ptr->submenu_elems->selector_str);
+                    LCD_I2C_printf("%-16s", sub_ptr->submenu_elems->selector_str);
                 }
             }
             else if (btn_state == BTN_SHORT_PRESS) // iterate to next topmenu entry
@@ -273,7 +302,7 @@ bool menu_statemachine(btn_state_t btn_state, bool* comm_changed)
                 
                 // Next selected top level menu element
                 LCD_I2C_setCursor(0, 1);
-                LCD_I2C_print(main_ptr->selector_str);
+                LCD_I2C_printf("%-16s", main_ptr->selector_str);
             }
 
             break;
@@ -292,6 +321,8 @@ bool menu_statemachine(btn_state_t btn_state, bool* comm_changed)
                 else if (elem->modifier_fn != NULL)
                 {
                     menu_state = MENU_STATE_MODIFY_VALUE;
+
+
                 }
             }
             else if (btn_state == BTN_SHORT_PRESS)
@@ -308,7 +339,7 @@ bool menu_statemachine(btn_state_t btn_state, bool* comm_changed)
                 const submenu_elem_t* elem = sub_ptr->submenu_elems + curr_sub_menu_idx;
 
                 LCD_I2C_setCursor(0, 1);
-                LCD_I2C_print(elem->selector_str);
+                LCD_I2C_printf("%-16s", elem->selector_str);
             }
             break;
         }
@@ -323,7 +354,9 @@ bool menu_statemachine(btn_state_t btn_state, bool* comm_changed)
             else if (btn_state == BTN_LONG_PRESS) // entering value done?
             {
                 menu_state = MENU_STATE_SEL_SUB; // go back to top
+                change_selector(elem->selector_str, true /*restore selector in case it is hidden right now*/);
             }
+
             break;
         }
         default:

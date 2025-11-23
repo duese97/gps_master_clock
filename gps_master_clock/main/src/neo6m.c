@@ -99,7 +99,7 @@ void NEO6M_Task(void *parameter)
         }
         
         // interpret received data
-        res = TinyGPS_wrapper_crack_datetime(&gps_local_time, &rm.last_connected_utc, &age);
+        res = TinyGPS_wrapper_crack_datetime(&gps_local_time, &ram_mirror.last_connected_utc, &age);
         if (res != 0)
         {
             PRINT_LOG("Unable to crack datetime, result: %d", res);
@@ -108,12 +108,12 @@ void NEO6M_Task(void *parameter)
         
         if (lock_state == GPS_LOCK_UNINITIALIZED)
         {
-            mcu_utc = rm.last_connected_utc;
+            mcu_utc = ram_mirror.last_connected_utc;
 
             // start cyclic timer
             ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US));
 
-            PRINT_LOG("Inital lock, age: %lu mcu utc: %lld last connected utc: %lld", age, mcu_utc, rm.last_connected_utc);
+            PRINT_LOG("Inital lock, age: %lu mcu utc: %lld last connected utc: %lld", age, mcu_utc, ram_mirror.last_connected_utc);
         }
 
         if (lock_state != GPS_LOCKED) // avoid sending same message over and over, if lock did not change
@@ -124,11 +124,11 @@ void NEO6M_Task(void *parameter)
         }
 
         // determine time difference between local clock and received time
-        double clock_diff = difftime(mcu_utc, rm.last_connected_utc);
+        double clock_diff = difftime(mcu_utc, ram_mirror.last_connected_utc);
         if (fabs(clock_diff) > MAX_ALLOWED_LOCAL_CLOCK_DRIFT_SECONDS)
         { // too great, adjust
             ESP_ERROR_CHECK(esp_timer_stop(periodic_timer)); // halt timer, it does read-modify-write of the variable (not atomic)!
-            mcu_utc = rm.last_connected_utc; // set new UTC timestamp
+            mcu_utc = ram_mirror.last_connected_utc; // set new UTC timestamp
             ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US)); // restart timer
 
             PRINT_LOG("Local clock drifted by: %lf, halting and re-adjusting to %lld", clock_diff, mcu_utc);
@@ -136,11 +136,11 @@ void NEO6M_Task(void *parameter)
             // Accumulate the total drifted time into separate counters
             if (clock_diff > 0)
             {
-                rm.total_pos_time_corrected += clock_diff;
+                ram_mirror.total_pos_time_corrected += clock_diff;
             }
             else
             {
-                rm.total_neg_time_corrected += -clock_diff;
+                ram_mirror.total_neg_time_corrected += -clock_diff;
             }
         }
     }

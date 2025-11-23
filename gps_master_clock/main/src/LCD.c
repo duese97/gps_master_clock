@@ -138,17 +138,17 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
         }
         case STATUS_CORRECTION_POS:
         {
-            LCD_I2C_printf("Lag:   %8lus", rm.total_pos_time_corrected);
+            LCD_I2C_printf("Lag:   %8lus", ram_mirror.total_pos_time_corrected);
             break;
         }
         case STATUS_CORRECTION_NEG:
         {
-            LCD_I2C_printf("Lead:  %8lus", rm.total_neg_time_corrected);
+            LCD_I2C_printf("Lead:  %8lus", ram_mirror.total_neg_time_corrected);
             break;
         }
         case STATUS_TOTAL_UPTIME:
         { // print the uptime in a well readable form
-            uint32_t uptime_val =  rm.total_uptime_seconds;
+            uint32_t uptime_val =  ram_mirror.total_uptime_seconds;
             char uptime_unit = 's';
             if (uptime_val > 3600)
             {
@@ -168,8 +168,8 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
         }
         case STATUS_CLOCK_FACE_TIME:
         {
-            uint8_t hours = rm.current_minutes_12o_clock / 60;
-            uint8_t minutes = rm.current_minutes_12o_clock % 60;
+            uint8_t hours = ram_mirror.current_minutes_12o_clock / 60;
+            uint8_t minutes = ram_mirror.current_minutes_12o_clock % 60;
             LCD_I2C_printf("Clock:     %02u:%02u", hours, minutes);
             break;
         }
@@ -362,88 +362,88 @@ void LCD_Task(void *parameter)
 
     while(1)
     {
-        if (receiveTaskMessage(TASK_LCD, 500, &msg) == true)
+        if (receiveTaskMessage(TASK_LCD, portMAX_DELAY, &msg) == false)
+            continue; // some error happened
+
+        switch(msg.cmd)
         {
-            switch(msg.cmd)
+            case TASK_CMD_GPS_LOCK_STATE:
             {
-                case TASK_CMD_GPS_LOCK_STATE:
-                {
-                    lock_state_local = msg.lock_state;
-                    break;
-                }
-                case TASK_CMD_LOCAL_TIME:
-                {
-                    // format the new time into local buffer
-                    tm = msg.local_time;
-                    snprintf(time_print_buff, sizeof(time_print_buff), "%02u:%02u:%02u %02u.%02u.%04u DST: %1u    ",
-                        (uint8_t)tm.tm_hour, (uint8_t)tm.tm_min, (uint8_t)tm.tm_sec,
-                        (uint8_t)tm.tm_mday, (uint8_t)(tm.tm_mon + 1), (uint16_t)(tm.tm_year + 1900),
-                        (bool)tm.tm_isdst
-                    );
+                lock_state_local = msg.lock_state;
+                break;
+            }
+            case TASK_CMD_LOCAL_TIME:
+            {
+                // format the new time into local buffer
+                tm = msg.local_time;
+                snprintf(time_print_buff, sizeof(time_print_buff), "%02u:%02u:%02u %02u.%02u.%04u DST: %1u    ",
+                    (uint8_t)tm.tm_hour, (uint8_t)tm.tm_min, (uint8_t)tm.tm_sec,
+                    (uint8_t)tm.tm_mday, (uint8_t)(tm.tm_mon + 1), (uint16_t)(tm.tm_year + 1900),
+                    (bool)tm.tm_isdst
+                );
 
-                    // Change the status screen
-                    if (tm.tm_sec % 5 == 0)
-                    {
-                        status_screen_idx++;
-                        if (status_screen_idx >= NUM_STATUS_IDX)
-                        {
-                            status_screen_idx = STATUS_START_IDX;
-                        }
-                    }
-                    break;
-                }
-                case TASK_CMD_SHUTDOWN:
+                // Change the status screen
+                if (tm.tm_sec % 5 == 0)
                 {
-                    if (use_display)
+                    status_screen_idx++;
+                    if (status_screen_idx >= NUM_STATUS_IDX)
                     {
-                        LCD_I2C_backlight(false); // disable backlight to save power
-                        LCD_I2C_clear(); // dummy command for backlight to take effect
+                        status_screen_idx = STATUS_START_IDX;
                     }
-                    vTaskSuspend(NULL);
+                }
+                break;
+            }
+            case TASK_CMD_SHUTDOWN:
+            {
+                if (use_display)
+                {
+                    LCD_I2C_backlight(false); // disable backlight to save power
+                    LCD_I2C_clear(); // dummy command for backlight to take effect
+                }
+                vTaskSuspend(NULL);
 
-                    if (use_display)
-                    {
-                        LCD_I2C_backlight(true); // enable again
-                    }
-                    break;
-                }
-                case TASK_CMD_REFRESH_LCD:
+                if (use_display)
                 {
-                    if (use_display == false)
-                    {
-                        continue;
-                    }
+                    LCD_I2C_backlight(true); // enable again
+                }
+                break;
+            }
+            case TASK_CMD_REFRESH_LCD:
+            {
+                if (use_display == false)
+                {
+                    continue;
+                }
 
-                    if (is_commissioning == false)
-                    {
-                        LCD_print_default_displays(time_print_buff, status_screen_idx, lock_state_local);
-                    }
-                    else
-                    {
-                        menu_update();
-                    }
-                    break;
-                }
-                case TASK_CMD_BTN_PRESS:
+                if (is_commissioning == false)
                 {
-                    // handle press, check if commissioning was started or stopped
-                    bool comm_changed = false;
-                    is_commissioning = menu_statemachine(msg.btn_state, &comm_changed);
+                    LCD_print_default_displays(time_print_buff, status_screen_idx, lock_state_local);
+                }
+                else
+                {
+                    menu_update();
+                }
+                break;
+            }
+            case TASK_CMD_BTN_PRESS:
+            {
+                // handle press, check if commissioning was started or stopped
+                bool comm_changed = false;
+                is_commissioning = menu_statemachine(msg.btn_state, &comm_changed);
 
-                    // if state changed, notify time keeping task
-                    if (comm_changed)
-                    {
-                        msg.dst = TASK_TIMEKEEP;
-                        msg.cmd = TASK_CMD_COMMISSIONING;
-                        msg.commissioning = is_commissioning;
-                        sendTaskMessage(&msg);
-                    }
-                    break;
-                }
-                default:
+                // if state changed, notify time keeping task
+                if (comm_changed)
                 {
-                    break;
+                    msg.dst = TASK_TIMEKEEP;
+                    msg.cmd = TASK_CMD_COMMISSIONING;
+                    msg.commissioning = is_commissioning;
+                    sendTaskMessage(&msg);
                 }
+                break;
+            }
+            default:
+            {
+                break;
             }
         }
     }

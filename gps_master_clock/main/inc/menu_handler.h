@@ -3,7 +3,7 @@
 
 #include "custom_main.h"
 
-bool menu_statemachine(btn_state_t btn_state, bool* comm_changed);
+bool menu_statemachine(btn_state_t btn_state, bool* menu_changed);
 void menu_update(void);
 
 #endif // _MENU_HANDLER_H_
