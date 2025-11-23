@@ -1,8 +1,16 @@
-#include "menu_handler.h"
+//---------------------------------------------------------------------------
+// Includes
+//---------------------------------------------------------------------------
 
+#include "menu_handler.h"
+#include "LCD.h"
 #include "LCM1602.h"
 #include <stdint.h>
 
+
+//---------------------------------------------------------------------------
+// Types
+//---------------------------------------------------------------------------
 typedef enum
 {
     MENU_SEL_EXIT,
@@ -23,7 +31,6 @@ typedef enum
     MENU_STATE_SEL_SUB, // iterating over sub menu
     MENU_STATE_MODIFY_VALUE, // setting a value withing sub menu
 } menu_state_t;
-
 
 typedef union
 {
@@ -48,6 +55,8 @@ typedef struct
     void (*modifier_fn)(val_union_t); 
     val_union_t fn_param; // parameter to be handed to modifier_fn
 
+    void (*apply_fn)(void); // 
+
     void (*update_fn)(void); // in case submenu entry should be periodically refreshed
 } submenu_elem_t;
 
@@ -67,6 +76,9 @@ typedef struct
     const submenu_t* submenu_ptr;
 } main_menu_t;
 
+//---------------------------------------------------------------------------
+// Local variables
+//---------------------------------------------------------------------------
 
 static main_menu_t const* main_ptr;
 static const submenu_t* sub_ptr;
@@ -75,20 +87,59 @@ static main_menu_state_t curr_main_menu_idx = MENU_SEL_EXIT;
 static uint8_t curr_sub_menu_idx = 0;
 static val_union_t local_storage; // scratch buffer for changing values
 
+
+//---------------------------------------------------------------------------
+// Master advance sub menu
+//---------------------------------------------------------------------------
+
 static void master_advance_fn(val_union_t val)
 {
     // increment the minutes as desired
-    ram_mirror.current_minutes_12o_clock += val.u32;
-    ram_mirror.current_minutes_12o_clock %= MINUTES_PER_12H;
-
-    // get current configured advanced time
-    uint8_t hours = ram_mirror.current_minutes_12o_clock / 60;
-    uint8_t minutes = ram_mirror.current_minutes_12o_clock % 60;
+    local_storage.i32 += val.u32;
+    local_storage.i32 %= MINUTES_PER_12H;
 
     // print it
     LCD_I2C_setCursor(0, 0);
-    LCD_I2C_printf("      %02u:%02u     ", hours, minutes);
+    LCD_I2C_printf("      %02u:%02u     ", local_storage.i32 / 60, local_storage.i32 % 60);
 }
+
+static void master_advance_apply_fn(void)
+{
+    ram_mirror.current_minutes_12o_clock = local_storage.i32;
+    store_ram_mirror();
+}
+
+static const submenu_elem_t master_advance_submenu_elems[] =
+{
+    {
+        .selector_str = ">"BACK_ICO_STR"  +1m  +1h  OK"
+    },
+    {
+        .selector_str = " "BACK_ICO_STR" >+1m  +1h  OK",
+        .modifier_fn = master_advance_fn,
+        .fn_param.u32 = 1,
+    },
+    {
+        .selector_str = " "BACK_ICO_STR"  +1m >+1h  OK",
+        .modifier_fn = master_advance_fn,
+        .fn_param.u32 = 60,
+    },
+    {
+        .selector_str = " "BACK_ICO_STR"  +1m  +1h >OK",
+        .apply_fn = master_advance_apply_fn,
+    },
+};
+static const submenu_t master_advance_submenu =
+{
+    .submenu_initial_title_str = "Master advance",
+    .num_submenu_elem = ARRAY_LEN(master_advance_submenu_elems),
+    .submenu_elems = master_advance_submenu_elems,
+    .init_value = {.i32_ptr = &(ram_mirror.current_minutes_12o_clock)},
+};
+
+//---------------------------------------------------------------------------
+// Slave advance sub menu
+//---------------------------------------------------------------------------
 
 static void slave_advance_fn(val_union_t val)
 {
@@ -100,52 +151,24 @@ static void slave_advance_fn(val_union_t val)
     };
     sendTaskMessage(&msg);
 }
+
 static void slave_advance_update(void)
 {
 }
 
-static void factory_reset_submenu_set(val_union_t val)
-{
-
-}
-
-static const submenu_elem_t master_advance_submenu_elems[] =
-{
-    {
-        .selector_str = ">exit  +1m  +1h"
-    },
-    {
-        .selector_str = " exit >+1m  +1h",
-        .modifier_fn = master_advance_fn,
-        .fn_param.u32 = 1,
-    },
-    {
-        .selector_str = " exit  +1m >+1h",
-        .modifier_fn = master_advance_fn,
-        .fn_param.u32 = 60,
-    },
-};
-static const submenu_t master_advance_submenu =
-{
-    .submenu_initial_title_str = "Master advance",
-    .num_submenu_elem = ARRAY_LEN(master_advance_submenu_elems),
-    .submenu_elems = master_advance_submenu_elems,
-};
-
-
 static const submenu_elem_t slave_advance_submenu_elems[] =
 {
     {
-        .selector_str = ">exit  +1m  +1h"
+        .selector_str = ">"BACK_ICO_STR"  +1m  +1h"
     },
     {
-        .selector_str = " exit >+1m  +1h",
+        .selector_str = " "BACK_ICO_STR" >+1m  +1h",
         .fn_param.u32 = 1,
         .modifier_fn = slave_advance_fn,
         .update_fn = slave_advance_update,
     },
     {
-        .selector_str = " exit  +1m >+1h",
+        .selector_str = " "BACK_ICO_STR"  +1m >+1h",
         .fn_param.u32 = 60,
         .modifier_fn = slave_advance_fn,
         .update_fn = slave_advance_update,
@@ -158,8 +181,17 @@ static const submenu_t slave_advance_submenu =
     .submenu_elems = slave_advance_submenu_elems,
 };
 
+//---------------------------------------------------------------------------
+// Pulse length sub menu
+//---------------------------------------------------------------------------
 
-static void pulse_len_change_fn(val_union_t val)
+static void apply_pulse_len_fn(void)
+{
+    ram_mirror.pulse_len_ms = local_storage.i16;
+    store_ram_mirror();
+}
+
+static void pulse_pause_len_change_fn(val_union_t val)
 {
     local_storage.i16 += val.i16;
     if(local_storage.i16 < abs(val.i16)) // make sure not to allow negative values
@@ -173,17 +205,21 @@ static void pulse_len_change_fn(val_union_t val)
 static const submenu_elem_t pulse_len_submenu_elems[] =
 {
     {
-        .selector_str = ">exit  +10  -10"
+        .selector_str = ">"BACK_ICO_STR"  +10  -10  OK"
     },
     {
-        .selector_str = " exit >+10  -10",
+        .selector_str = " "BACK_ICO_STR" >+10  -10  OK",
         .fn_param.i16 = 10,
-        .modifier_fn = pulse_len_change_fn,
+        .modifier_fn = pulse_pause_len_change_fn,
     },
     {
-        .selector_str = " exit  +10 >-10",
+        .selector_str = " "BACK_ICO_STR"  +10 >-10  OK",
         .fn_param.i16 = -10,
-        .modifier_fn = pulse_len_change_fn,
+        .modifier_fn = pulse_pause_len_change_fn,
+    },
+    {
+        .selector_str = " "BACK_ICO_STR"  +10  -10 >OK",
+        .apply_fn = apply_pulse_len_fn,
     },
 };
 static const submenu_t pulse_len_submenu =
@@ -194,15 +230,62 @@ static const submenu_t pulse_len_submenu =
     .init_value = { .u16_ptr = &(ram_mirror.pulse_len_ms) },
 };
 
+//---------------------------------------------------------------------------
+// Pulse pause sub menu
+//---------------------------------------------------------------------------
+
+static void apply_pulse_pause_fn(void)
+{
+    ram_mirror.pulse_pause_ms = local_storage.i16;
+    store_ram_mirror();
+}
+
+static const submenu_elem_t pulse_pause_submenu_elems[] =
+{
+    {
+        .selector_str = ">"BACK_ICO_STR"  +10  -10  OK"
+    },
+    {
+        .selector_str = " "BACK_ICO_STR" >+10  -10  OK",
+        .fn_param.i16 = 10,
+        .modifier_fn = pulse_pause_len_change_fn,
+    },
+    {
+        .selector_str = " "BACK_ICO_STR"  +10 >-10  OK",
+        .fn_param.i16 = -10,
+        .modifier_fn = pulse_pause_len_change_fn,
+    },
+    {
+        .selector_str = " "BACK_ICO_STR"  +10  -10 >OK",
+        .apply_fn = apply_pulse_pause_fn,
+    },
+};
+static const submenu_t pulse_pause_submenu =
+{
+    .submenu_initial_title_str = "Pulse pause",
+    .num_submenu_elem = ARRAY_LEN(pulse_pause_submenu_elems),
+    .submenu_elems = pulse_pause_submenu_elems,
+    .init_value = { .u16_ptr = &(ram_mirror.pulse_pause_ms) },
+};
+
+//---------------------------------------------------------------------------
+// Factory reset sub menu
+//---------------------------------------------------------------------------
+
+static void factory_reset_submenu_set(void)
+{
+    ram_mirror = ram_mirror_default;
+    store_ram_mirror();
+}
 
 static const submenu_elem_t factory_reset_submenu_elems[] =
 {
     {
-        .selector_str = ">exit  yes",
+        .selector_str = ">"BACK_ICO_STR"  yes",
     },
     {
-        .selector_str = " exit >yes",
-        .modifier_fn = factory_reset_submenu_set,
+        .selector_str = " "BACK_ICO_STR" >yes",
+        .apply_fn = factory_reset_submenu_set,
     },
 };
 static const submenu_t factory_reset_submenu =
@@ -212,6 +295,11 @@ static const submenu_t factory_reset_submenu =
     .num_submenu_elem = ARRAY_LEN(factory_reset_submenu_elems),
     .submenu_elems = factory_reset_submenu_elems,
 };
+
+
+//---------------------------------------------------------------------------
+// Main menu
+//---------------------------------------------------------------------------
 
 static const main_menu_t main_menu[] =
 {
@@ -237,7 +325,7 @@ static const main_menu_t main_menu[] =
     [MENU_SEL_PULSE_PAUSE] =
     {
         .selector_str = ">Pulse pause",
-        .submenu_ptr = &slave_advance_submenu,
+        .submenu_ptr = &pulse_pause_submenu,
     },
     [MENU_SEL_FULL_RESET] =
     {
@@ -245,6 +333,11 @@ static const main_menu_t main_menu[] =
         .submenu_ptr = &factory_reset_submenu,
     },
 };
+
+
+//---------------------------------------------------------------------------
+// Utilities and 'driver'
+//---------------------------------------------------------------------------
 
 static void print_topmenu(void)
 {
@@ -388,6 +481,13 @@ bool menu_statemachine(btn_state_t btn_state, bool* menu_changed)
                         local_storage.u32 = *(sub_ptr->init_value.u32_ptr); // load word, care about type later
                         
                     }
+                }
+                else if (elem->apply_fn != 0)
+                {
+                    elem->apply_fn();
+                    // show top menu again
+                    menu_state = MENU_STATE_SEL_TOP;
+                    print_topmenu();
                 }
             }
             else if (btn_state == BTN_SHORT_PRESS)

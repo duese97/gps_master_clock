@@ -29,7 +29,7 @@ static void print_stats(void)
         "\tUptime: %lus = %luh = %lud",
         esp_get_free_heap_size(), esp_get_minimum_free_heap_size(),
         ram_mirror.total_pos_time_corrected, ram_mirror.total_neg_time_corrected,
-        ram_mirror.total_uptime_seconds, ram_mirror.total_uptime_seconds / 3600, ram_mirror.total_uptime_seconds / (3600 * 24)
+        ram_mirror.total_operating_seconds, ram_mirror.total_operating_seconds / 3600, ram_mirror.total_operating_seconds / (3600 * 24)
     );
     uint8_t curr_num_tasks = uxTaskGetNumberOfTasks();
     if (last_num_tasks != curr_num_tasks)
@@ -114,8 +114,8 @@ void TIMEKEEP_Task(void *parameter)
                 }
                 case TASK_CMD_SECOND_TICK:
                 {
-                    ram_mirror.total_uptime_seconds++;
-                    if (ram_mirror.total_uptime_seconds % 60 == 0)
+                    ram_mirror.total_operating_seconds++;
+                    if (ram_mirror.total_operating_seconds % 60 == 0)
                     {
                         print_stats();
                     }
@@ -177,7 +177,7 @@ void TIMEKEEP_Task(void *parameter)
                         if (minutes_lead < MAX_LOCAL_CLOCK_LEAD_MINUTES)
                         {
                             clock_minutes_diff = -minutes_lead; // this way is 'shorter'
-                            PRINT_LOG("Local time leads slightly, with the GPS time about to wrap");
+                            PRINT_LOG("Local time leads slightly, with the GPS time about to wrap"); // TODO: correct print/handling?
                             continue;
                         }
                     }
@@ -195,7 +195,7 @@ void TIMEKEEP_Task(void *parameter)
                         }
                     }
 
-                    PRINT_LOG("%02d:%02d -> %d minutes time difference to target -> %02d:%02d(%02d:%02d)",
+                    PRINT_LOG("%02ld:%02ld -> %d minutes time difference to target -> %02d:%02d(%02d:%02d)",
                         ram_mirror.current_minutes_12o_clock / 60, ram_mirror.current_minutes_12o_clock % 60,
                         clock_minutes_diff,
                         target_local_time.tm_hour % 12, target_local_time.tm_min,

@@ -13,8 +13,6 @@
 #define NUM_COLUMNS 16
 #define NUM_ROWS 2
 
-#define GRAM_BACKSLASH_INDEX 1
-
 #define REFRESH_INTERVAL_MS     ( 500 / portTICK_PERIOD_MS ) 
 
 // '13:08:00 15.11.2025 DST: 0    ' = 26 chars + 4 spaces + 1 null
@@ -46,21 +44,29 @@ enum
 // Local constants
 //---------------------------------------------------------------------------
 
-static const char wait_animation[] = {'|', '/', '-', GRAM_BACKSLASH_INDEX};
+static const char wait_animation[] = {'|', '/', '-', GRAM_BACKSLASH_IDX};
 static const uint8_t backslash_charmap[] =
 {
- // these bits are usable:
- //      <--->
-    0b00000000,
-    0b00010000,
-    0b00001000,
-    0b00000100,
-    0b00000010,
-    0b00000001,
-    0b00000000,
-    0b00000000
+    0b00000,
+    0b10000,
+    0b01000,
+    0b00100,
+    0b00010,
+    0b00001,
+    0b00000,
+    0b00000
 };
-
+static const uint8_t back_icon_charmap[] =
+{
+    0b01110,
+    0b00001,
+    0b00001,
+    0b00101,
+    0b01101,
+    0b11110,
+    0b01100,
+    0b00100
+};
 
 //---------------------------------------------------------------------------
 // Local variables
@@ -148,7 +154,7 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
         }
         case STATUS_TOTAL_UPTIME:
         { // print the uptime in a well readable form
-            uint32_t uptime_val =  ram_mirror.total_uptime_seconds;
+            uint32_t uptime_val =  ram_mirror.total_operating_seconds;
             char uptime_unit = 's';
             if (uptime_val > 3600)
             {
@@ -355,8 +361,9 @@ void LCD_Task(void *parameter)
     
         // for some reason the driver has no backslash, create one ourself
         // for some other reason writing to GRAM only works after the prints above
-        LCD_I2C_createChar(GRAM_BACKSLASH_INDEX, backslash_charmap);
-    
+        LCD_I2C_createChar(GRAM_BACKSLASH_IDX, backslash_charmap);
+        LCD_I2C_createChar(GRAM_BACK_ICON_IDX, back_icon_charmap);
+
         vTaskDelay(1000);
     }
 

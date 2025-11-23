@@ -94,7 +94,7 @@ SemaphoreHandle_t xUartSemaphore;
 char print_buf[MAX_LOG_LEN];
 
 // default values
-static const ram_mirror_t ram_mirror_default =
+const ram_mirror_t ram_mirror_default =
 {
     .pulse_len_ms = 100,
     .pulse_pause_ms = 100,
@@ -246,7 +246,7 @@ static esp_err_t inital_nvs_load(bool soft_reset)
     }
     PRINT_LOG(
         "Using config:\n"
-        "\tcurrent_minutes_12o_clock: %d (%02d:%02d)\n"
+        "\tcurrent_minutes_12o_clock: %ld (%02ld:%02ld)\n"
         "\ttotal_pos_time_corrected: %lu total_neg_time_corrected: %lu\n"
         "\tmirror_saved_times: %lu\n"
         "\tpulse_len_ms: %u pulse_pause_ms: %u\n"

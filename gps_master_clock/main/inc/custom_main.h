@@ -108,12 +108,12 @@ typedef struct
 {
   time_t last_connected_utc;
   
-  int current_minutes_12o_clock; // local minutes after 12 o clock position
+  int32_t current_minutes_12o_clock; // local minutes after 12 o clock position
 
   // time related stats
   uint32_t total_pos_time_corrected;
   uint32_t total_neg_time_corrected;
-  uint32_t total_uptime_seconds;
+  uint32_t total_operating_seconds;
 
   uint32_t mirror_saved_times; // how many times the RAM mirror was persisted
   uint32_t magic_word; // to easily determine if the struct contains valid data
@@ -139,6 +139,7 @@ extern SemaphoreHandle_t xUartSemaphore;
 extern char print_buf[MAX_LOG_LEN];
 
 extern ram_mirror_t ram_mirror;
+extern const ram_mirror_t ram_mirror_default;
 
 /* exported functions */
 void serial_print_custom(void);
