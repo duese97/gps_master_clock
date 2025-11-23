@@ -8,6 +8,7 @@
 #include "custom_main.h"
 #include "bsp.h"
 
+#define TOGGLE_ONBOARD_LED gpio_set_level(GPIO_LED, gpio_get_level(GPIO_LED) ? 0 : 1)
 
 // Set timezone for Europe/Berlin (https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv)
 static const char* timezone_europe_berlin = "CET-1CEST,M3.5.0,M10.5.0/3";
@@ -85,6 +86,8 @@ void TIMEKEEP_Task(void *parameter)
     bool commissioning = false;
 
     gpio_set_direction(GPIO_LED, GPIO_MODE_INPUT_OUTPUT);
+    gpio_set_direction(H_BRIDGE_DIR, GPIO_MODE_INPUT_OUTPUT);
+    gpio_set_direction(H_BRIDGE_EN, GPIO_MODE_INPUT_OUTPUT);
 
     while(1)
     {
@@ -108,7 +111,10 @@ void TIMEKEEP_Task(void *parameter)
                 case TASK_CMD_SLAVE_ADVANCE_MINUTES:
                 {
                     if (commissioning)
+                    {
                         clock_minutes_diff += msg.slave_advance_minutes;
+                        PRINT_LOG("Minutes left to step: %d", clock_minutes_diff);
+                    }
                     
                     break;
                 }
@@ -126,7 +132,10 @@ void TIMEKEEP_Task(void *parameter)
                     }
 
                     // Toggle LED to indicate activity
-                    gpio_set_level(GPIO_LED, gpio_get_level(GPIO_LED) ? 0 : 1);
+                    if (clock_minutes_diff > 0)
+                    { // only if not actively pulsing, otherwise it looks weird
+                        TOGGLE_ONBOARD_LED;
+                    }
 
                     take_tz_mutex(); // wait until we can manipulate the timezone
 
@@ -211,17 +220,19 @@ void TIMEKEEP_Task(void *parameter)
 
         if (clock_minutes_diff > 0) // no backwards pulses possible
         { // if we come here: do clock pulses
-            // set GPIO(s)
-            gpio_set_level(GPIO_LED, 0);
+            TOGGLE_ONBOARD_LED;
+            gpio_set_level(H_BRIDGE_DIR, !ram_mirror.hbridge_last_pol); // set opposite polarity as last time
+            gpio_set_level(H_BRIDGE_EN, 1);
             vTaskDelay(ram_mirror.pulse_len_ms / portTICK_PERIOD_MS);
-            // set GPIO(s)
+
+            gpio_set_level(H_BRIDGE_EN, 0);
             gpio_set_level(GPIO_LED, 1);
+            TOGGLE_ONBOARD_LED;
             vTaskDelay(ram_mirror.pulse_pause_ms / portTICK_PERIOD_MS);
 
-            // Set GPIO(s)
-            gpio_set_level(GPIO_LED, 0);
             ram_mirror.current_minutes_12o_clock++; // one step closer to the target time
             ram_mirror.current_minutes_12o_clock %= MINUTES_PER_12H; // keep within 12 hour bounds
+            ram_mirror.hbridge_last_pol = !ram_mirror.hbridge_last_pol; // toggle polarity
             clock_minutes_diff--;
         }
     }

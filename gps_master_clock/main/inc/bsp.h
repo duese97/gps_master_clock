@@ -28,5 +28,7 @@
 #define LOGGING_UART_TX         GPIO_NUM_1
 #define LOGGING_UART_RX         GPIO_NUM_3
 
+#define H_BRIDGE_DIR            GPIO_NUM_26
+#define H_BRIDGE_EN             GPIO_NUM_27
 
 #endif // _BSP_H_

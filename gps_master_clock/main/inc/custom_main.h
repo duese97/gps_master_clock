@@ -122,6 +122,8 @@ typedef struct
   uint16_t pulse_len_ms;
   uint16_t pulse_pause_ms;
 
+  bool hbridge_last_pol;
+
 } ram_mirror_t;
 
 // global shared RAM data, which is not persisted
