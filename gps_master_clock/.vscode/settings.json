@@ -42,6 +42,7 @@
     "lcm1602.h": "c",
     "i2c_master.h": "c",
     "uart.h": "c",
-    "sdkconfig.h": "c"
+    "sdkconfig.h": "c",
+    "menu_handler.h": "c"
   }
 }

@@ -2,6 +2,7 @@
 #include "LCM1602.h"
 
 #include "custom_main.h"
+#include "menu_handler.h"
 #include "bsp.h"
 
 
@@ -127,7 +128,7 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
             }
             else
             {
-                LCD_I2C_printf(scratch_buff, "Await GPS lock %c", wait_animation[wait_animation_idx]);
+                LCD_I2C_printf("Await GPS lock %c", wait_animation[wait_animation_idx]);
 
                 wait_animation_idx++;
                 if (wait_animation_idx >= ARRAY_LEN(wait_animation))
@@ -419,27 +420,24 @@ void LCD_Task(void *parameter)
                     }
                     else
                     {
-                        
+                        menu_update();
                     }
                     break;
                 }
                 case TASK_CMD_BTN_PRESS:
                 {
-                    char* type = "?";
-                    if (msg.btn_state == BTN_SHORT_PRESS)
-                    {
-                        type = "short";
-                    }
-                    else if (msg.btn_state == BTN_LONG_PRESS)
-                    {
-                        type = "long";
-                    }
-                    else if (msg.btn_state == BTN_VERY_LONG_PRESS)
-                    {
-                        type = "very long";
-                    }
+                    // handle press, check if commissioning was started or stopped
+                    bool comm_changed = false;
+                    is_commissioning = menu_statemachine(msg.btn_state, &comm_changed);
 
-                    PRINT_LOG("%s press", type);
+                    // if state changed, notify time keeping task
+                    if (comm_changed)
+                    {
+                        msg.dst = TASK_TIMEKEEP;
+                        msg.cmd = TASK_CMD_COMMISSIONING;
+                        msg.commissioning = is_commissioning;
+                        sendTaskMessage(&msg);
+                    }
                     break;
                 }
                 default:

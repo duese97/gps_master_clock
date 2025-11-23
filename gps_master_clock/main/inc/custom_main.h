@@ -56,8 +56,7 @@ typedef enum
   TASK_CMD_START = 0,
   TASK_CMD_SECOND_TICK = TASK_CMD_START,
 
-  TASK_CMD_START_COMMISSIONING,
-  TASK_CMD_STOP_COMMISSIONING,
+  TASK_CMD_COMMISSIONING,
 
   TASK_CMD_SLAVE_ADVANCE_MINUTES,
 
@@ -100,6 +99,7 @@ typedef struct
     struct tm local_time;
     btn_state_t btn_state;
     uint8_t slave_advance_minutes;
+    bool commissioning;
   };
 } task_msg_t;
 
