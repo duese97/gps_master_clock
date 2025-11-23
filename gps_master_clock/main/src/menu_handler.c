@@ -8,6 +8,8 @@ typedef enum
     MENU_SEL_EXIT,
     MENU_SEL_MASTER_ADVANCE,
     MENU_SEL_SLAVE_ADVANCE,
+    MENU_SEL_PULSE_LEN,
+    MENU_SEL_PULSE_PAUSE,
     MENU_SEL_FULL_RESET,
 
     MENU_SEL_NUM_ELEM
@@ -23,42 +25,55 @@ typedef enum
 } menu_state_t;
 
 
-typedef struct
+typedef union
 {
+    int16_t i16;
+    uint16_t u16;
     uint32_t u32;
     int32_t i32;
     float f;
+
+    int16_t* i16_ptr;
+    uint16_t* u16_ptr;
+    uint32_t* u32_ptr;
+    int32_t* i32_ptr;
+    float* f_ptr;
 } val_union_t;
 
 typedef struct
 {
     const char* selector_str;
-    void (*modifier_fn)(val_union_t);
-    void (*update_fn)(void);
-    val_union_t fn_param;
+    
+    // for altering values
+    void (*modifier_fn)(val_union_t); 
+    val_union_t fn_param; // parameter to be handed to modifier_fn
+
+    void (*update_fn)(void); // in case submenu entry should be periodically refreshed
 } submenu_elem_t;
 
 typedef struct
 {
-    const char* submenu_initial_title_str;
+    const char* submenu_initial_title_str; // what should be shown when first entering the menu
     const char* processing_str;
     const uint8_t num_submenu_elem;
     const submenu_elem_t* submenu_elems;
+
+    val_union_t init_value;    // where value is to be initially loaded from
 } submenu_t;
 
 typedef struct
 {
     const char* selector_str;
-    submenu_t const* submenu_ptr;
+    const submenu_t* submenu_ptr;
 } main_menu_t;
 
 
 static main_menu_t const* main_ptr;
-static submenu_t const* sub_ptr;
+static const submenu_t* sub_ptr;
 static menu_state_t menu_state;
 static main_menu_state_t curr_main_menu_idx = MENU_SEL_EXIT;
 static uint8_t curr_sub_menu_idx = 0;
-
+static val_union_t local_storage; // scratch buffer for changing values
 
 static void master_advance_fn(val_union_t val)
 {
@@ -144,6 +159,42 @@ static const submenu_t slave_advance_submenu =
 };
 
 
+static void pulse_len_change_fn(val_union_t val)
+{
+    local_storage.i16 += val.i16;
+    if(local_storage.i16 < abs(val.i16)) // make sure not to allow negative values
+    {
+        local_storage.i16 = abs(val.i16);
+    }
+    // print it
+    LCD_I2C_setCursor(0, 0);
+    LCD_I2C_printf("%5dms         ", local_storage.i16);
+}
+static const submenu_elem_t pulse_len_submenu_elems[] =
+{
+    {
+        .selector_str = ">exit  +10  -10"
+    },
+    {
+        .selector_str = " exit >+10  -10",
+        .fn_param.i16 = 10,
+        .modifier_fn = pulse_len_change_fn,
+    },
+    {
+        .selector_str = " exit  +10 >-10",
+        .fn_param.i16 = -10,
+        .modifier_fn = pulse_len_change_fn,
+    },
+};
+static const submenu_t pulse_len_submenu =
+{
+    .submenu_initial_title_str = "Pulse length",
+    .num_submenu_elem = ARRAY_LEN(pulse_len_submenu_elems),
+    .submenu_elems = pulse_len_submenu_elems,
+    .init_value = { .u16_ptr = &(ram_mirror.pulse_len_ms) },
+};
+
+
 static const submenu_elem_t factory_reset_submenu_elems[] =
 {
     {
@@ -176,6 +227,16 @@ static const main_menu_t main_menu[] =
     [MENU_SEL_SLAVE_ADVANCE] =
     {
         .selector_str = ">Slave advance",
+        .submenu_ptr = &slave_advance_submenu,
+    },
+    [MENU_SEL_PULSE_LEN] =
+    {
+        .selector_str = ">Pulse length",
+        .submenu_ptr = &pulse_len_submenu,
+    },
+    [MENU_SEL_PULSE_PAUSE] =
+    {
+        .selector_str = ">Pulse pause",
         .submenu_ptr = &slave_advance_submenu,
     },
     [MENU_SEL_FULL_RESET] =
@@ -322,7 +383,11 @@ bool menu_statemachine(btn_state_t btn_state, bool* menu_changed)
                 {
                     menu_state = MENU_STATE_MODIFY_VALUE;
 
-
+                    if (sub_ptr->init_value.u32_ptr != NULL) // check if we need to initialize the value
+                    {
+                        local_storage.u32 = *(sub_ptr->init_value.u32_ptr); // load word, care about type later
+                        
+                    }
                 }
             }
             else if (btn_state == BTN_SHORT_PRESS)
