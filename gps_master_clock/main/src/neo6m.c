@@ -36,15 +36,18 @@ const int intr_alloc_flags =
 #endif // CONFIG_UART_ISR_IN_IRAM
 
 
-static volatile time_t mcu_utc;
-
-
+static volatile time_t mcu_utc; // current, locally tracked UTC time of the micro controller
+static volatile int64_t minute_wraparound_ISR = 0; // timestamp in microseconds when minute wraparound happened
 
 static void periodic_timer_callback(void* arg)
 {
     static task_msg_t msg = {.dst = TASK_TIMEKEEP, .cmd = TASK_CMD_SECOND_TICK }; // prepare message
     mcu_utc++;
     msg.utc_time = mcu_utc;
+    if (mcu_utc % 60 == 0)
+    {
+        minute_wraparound_ISR = esp_timer_get_time(); // remember time
+    }
 
     sendTaskMessageISR(&msg);
 }
@@ -66,6 +69,7 @@ void NEO6M_Task(void *parameter)
     char buf;
     struct tm gps_local_time = {0}; 
     uint32_t age;
+    int minute_old; // for determining when minute changed
 
     GPS_LOCK_STATE_t lock_state = GPS_LOCK_UNINITIALIZED;
 
@@ -109,11 +113,21 @@ void NEO6M_Task(void *parameter)
         if (lock_state == GPS_LOCK_UNINITIALIZED)
         {
             mcu_utc = ram_mirror.last_connected_utc;
+            minute_old = gps_local_time.tm_min;
 
             // start cyclic timer
             ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US));
 
             PRINT_LOG("Inital lock, age: %lu mcu utc: %lld last connected utc: %lld", age, mcu_utc, ram_mirror.last_connected_utc);
+        }
+        else if (lock_state == GPS_LOCKED && minute_old != gps_local_time.tm_min)
+        { // only if locked once and minute changed
+            minute_old = gps_local_time.tm_min;
+            // If locked, we can compare the phase difference between the GPS signal and
+            // the local clock. Ideally it should remain relatively constant.
+            int64_t curr_diff_us = esp_timer_get_time() - minute_wraparound_ISR; // make snapshot
+            int64_t curr_diff_ms = curr_diff_us / 1000;
+            PRINT_LOG("Phase difference local clock <-> GPS: %lldus = %lldms", curr_diff_us, curr_diff_ms);
         }
 
         if (lock_state != GPS_LOCKED) // avoid sending same message over and over, if lock did not change

@@ -145,12 +145,12 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
         }
         case STATUS_CORRECTION_POS:
         {
-            LCD_I2C_printf("Lag:   %8lus", ram_mirror.total_pos_time_corrected);
+            LCD_I2C_printf(SUM_ICO_STR"lag:  %8lus", ram_mirror.total_pos_time_corrected);
             break;
         }
         case STATUS_CORRECTION_NEG:
         {
-            LCD_I2C_printf("Lead:  %8lus", ram_mirror.total_neg_time_corrected);
+            LCD_I2C_printf(SUM_ICO_STR"lead: %8lus", ram_mirror.total_neg_time_corrected);
             break;
         }
         case STATUS_TOTAL_UPTIME:
@@ -372,7 +372,7 @@ void LCD_Task(void *parameter)
 
         PRINT_LOG("Button pressed at boot, starting commissioning");
     }
-    
+
     if (use_display)
     {
         LCD_I2C_setCursor(0, 0);
@@ -428,12 +428,14 @@ void LCD_Task(void *parameter)
                     LCD_I2C_backlight(false); // disable backlight to save power
                     LCD_I2C_clear(); // dummy command for backlight to take effect
                 }
+                xTimerStop(refresh_timer, 1); // avoid refresh timer trying to notify LCD task
                 vTaskSuspend(NULL);
 
                 if (use_display)
                 {
                     LCD_I2C_backlight(true); // enable again
                 }
+                xTimerStart(refresh_timer, 1); // resume timer
                 break;
             }
             case TASK_CMD_REFRESH_LCD:
