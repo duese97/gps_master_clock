@@ -37,6 +37,7 @@ enum
     STATUS_TOTAL_UPTIME,
     STATUS_CURRENT_UPTIME,
     STATUS_SLAVE_CLOCK,
+    STATUS_PHASE_DIFFERENCE,
     NUM_STATUS_IDX
 };
 
@@ -145,12 +146,12 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
         }
         case STATUS_CORRECTION_POS:
         {
-            LCD_I2C_printf(SUM_ICO_STR"lag:  %8lus", ram_mirror.total_pos_time_corrected);
+            LCD_I2C_printf(SUM_ICO_STR" lag: %8lus", ram_mirror.total_pos_time_corrected);
             break;
         }
         case STATUS_CORRECTION_NEG:
         {
-            LCD_I2C_printf(SUM_ICO_STR"lead: %8lus", ram_mirror.total_neg_time_corrected);
+            LCD_I2C_printf(SUM_ICO_STR" lead:%8lus", ram_mirror.total_neg_time_corrected);
             break;
         }
         case STATUS_TOTAL_UPTIME:
@@ -186,6 +187,11 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
             uint8_t hours = ram_mirror.current_slave_minutes_12o_clock / 60;
             uint8_t minutes = ram_mirror.current_slave_minutes_12o_clock % 60;
             LCD_I2C_printf("Slave Clk: %02u:%02u", hours, minutes);
+            break;
+        }
+        case STATUS_PHASE_DIFFERENCE:
+        {
+            LCD_I2C_printf("Phase:  %+6dms", ram_shared.phase_difference_ms);
             break;
         }
         default:

@@ -37,7 +37,10 @@ const int intr_alloc_flags =
 
 
 static volatile time_t mcu_utc; // current, locally tracked UTC time of the micro controller
-static volatile int64_t minute_wraparound_ISR = 0; // timestamp in microseconds when minute wraparound happened
+
+// timestamp in microseconds when minute wraparound happened..
+static volatile int64_t minute_wraparound_ISR = 0; // .. in interrupt
+static volatile int64_t minute_wraparound_Task = 0; // .. in task
 
 static void periodic_timer_callback(void* arg)
 {
@@ -47,6 +50,11 @@ static void periodic_timer_callback(void* arg)
     if (mcu_utc % 60 == 0)
     {
         minute_wraparound_ISR = esp_timer_get_time(); // remember time
+        if (minute_wraparound_Task != 0) // we were slower than the task
+        {
+            ram_shared.phase_difference_ms = (minute_wraparound_ISR - minute_wraparound_Task)  / 1000;
+            minute_wraparound_Task = 0; // 'ack' the read
+        }
     }
 
     sendTaskMessageISR(&msg);
@@ -121,13 +129,24 @@ void NEO6M_Task(void *parameter)
             PRINT_LOG("Inital lock, age: %lu mcu utc: %lld last connected utc: %lld", age, mcu_utc, ram_mirror.last_connected_utc);
         }
         else if (lock_state == GPS_LOCKED && minute_old != gps_local_time.tm_min)
-        { // only if locked once and minute changed
-            minute_old = gps_local_time.tm_min;
+        {
             // If locked, we can compare the phase difference between the GPS signal and
             // the local clock. Ideally it should remain relatively constant.
-            int64_t curr_diff_us = esp_timer_get_time() - minute_wraparound_ISR; // make snapshot
-            int64_t curr_diff_ms = curr_diff_us / 1000;
-            PRINT_LOG("Phase difference local clock <-> GPS: %lldus = %lldms", curr_diff_us, curr_diff_ms);
+            minute_old = gps_local_time.tm_min;
+
+            // Critical section to determine the difference: if the ISR was faster than this task:
+            // calculate the difference
+            portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+            taskENTER_CRITICAL(&mux);
+            minute_wraparound_Task = esp_timer_get_time(); // make snapshot in any case
+            if (minute_wraparound_ISR != 0)
+            {
+                ram_shared.phase_difference_ms = (minute_wraparound_ISR - minute_wraparound_Task)  / 1000;
+                minute_wraparound_ISR = 0; // 'ack' the read
+            }
+            taskEXIT_CRITICAL(&mux);
+
+            PRINT_LOG("Phase difference local clock <-> GPS: %ldms", ram_shared.phase_difference_ms);
         }
 
         if (lock_state != GPS_LOCKED) // avoid sending same message over and over, if lock did not change

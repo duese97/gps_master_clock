@@ -130,6 +130,7 @@ typedef struct
 typedef struct
 {
   uint32_t operating_seconds; // seconds since last boot
+  int32_t phase_difference_ms;
 } ram_shared_t;
 
 //---------------------------------------------------------------------------
