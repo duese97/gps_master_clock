@@ -105,7 +105,7 @@ static void master_advance_fn(val_union_t val)
 
 static void master_advance_apply_fn(void)
 {
-    ram_mirror.current_minutes_12o_clock = local_storage.i32;
+    ram_mirror.current_slave_minutes_12o_clock = local_storage.i32;
     store_ram_mirror();
 }
 
@@ -134,7 +134,7 @@ static const submenu_t master_advance_submenu =
     .submenu_initial_title_str = "Master advance",
     .num_submenu_elem = ARRAY_LEN(master_advance_submenu_elems),
     .submenu_elems = master_advance_submenu_elems,
-    .init_value = {.i32_ptr = &(ram_mirror.current_minutes_12o_clock)},
+    .init_value = {.i32_ptr = &(ram_mirror.current_slave_minutes_12o_clock)},
 };
 
 //---------------------------------------------------------------------------
@@ -151,11 +151,6 @@ static void slave_advance_fn(val_union_t val)
     };
     sendTaskMessage(&msg);
 }
-
-static void slave_advance_update(void)
-{
-}
-
 static const submenu_elem_t slave_advance_submenu_elems[] =
 {
     {
@@ -165,13 +160,11 @@ static const submenu_elem_t slave_advance_submenu_elems[] =
         .selector_str = " "BACK_ICO_STR" >+1m  +1h",
         .fn_param.u32 = 1,
         .modifier_fn = slave_advance_fn,
-        .update_fn = slave_advance_update,
     },
     {
         .selector_str = " "BACK_ICO_STR"  +1m >+1h",
         .fn_param.u32 = 60,
         .modifier_fn = slave_advance_fn,
-        .update_fn = slave_advance_update,
     },
 };
 static const submenu_t slave_advance_submenu =

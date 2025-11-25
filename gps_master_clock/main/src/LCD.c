@@ -35,7 +35,8 @@ enum
     STATUS_CORRECTION_POS,
     STATUS_CORRECTION_NEG,
     STATUS_TOTAL_UPTIME,
-    STATUS_CLOCK_FACE_TIME,
+    STATUS_CURRENT_UPTIME,
+    STATUS_SLAVE_CLOCK,
     NUM_STATUS_IDX
 };
 
@@ -153,8 +154,9 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
             break;
         }
         case STATUS_TOTAL_UPTIME:
+        case STATUS_CURRENT_UPTIME:
         { // print the uptime in a well readable form
-            uint32_t uptime_val =  ram_mirror.total_operating_seconds;
+            uint32_t uptime_val =  status_screen_idx == STATUS_TOTAL_UPTIME ? ram_mirror.total_operating_seconds : ram_shared.operating_seconds;
             char uptime_unit = 's';
             if (uptime_val > 3600)
             {
@@ -169,14 +171,21 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
                     uptime_unit = 'h';
                 }
             }
-            LCD_I2C_printf("Uptime %8lu%c", uptime_val, uptime_unit);
+            if (status_screen_idx == STATUS_TOTAL_UPTIME)
+            {
+                LCD_I2C_printf(SUM_ICO_STR" uptime %6lu%c", uptime_val, uptime_unit);
+            }
+            else
+            {
+                LCD_I2C_printf("Uptime %8lu%c", uptime_val, uptime_unit);
+            }
             break;
         }
-        case STATUS_CLOCK_FACE_TIME:
+        case STATUS_SLAVE_CLOCK:
         {
-            uint8_t hours = ram_mirror.current_minutes_12o_clock / 60;
-            uint8_t minutes = ram_mirror.current_minutes_12o_clock % 60;
-            LCD_I2C_printf("Clock:     %02u:%02u", hours, minutes);
+            uint8_t hours = ram_mirror.current_slave_minutes_12o_clock / 60;
+            uint8_t minutes = ram_mirror.current_slave_minutes_12o_clock % 60;
+            LCD_I2C_printf("Slave Clk: %02u:%02u", hours, minutes);
             break;
         }
         default:
@@ -352,6 +361,18 @@ void LCD_Task(void *parameter)
 
     xTimerStart(refresh_timer, 10);
 
+    // Special handling: If button is pressed at boot, we directly start the commissioning.
+    // Send message to self.
+    if (gpio_get_level(USR_BUTTON_IO) == USR_BUTTON_PRESS_LVL)
+    {
+        msg.dst = TASK_LCD;
+        msg.cmd = TASK_CMD_BTN_PRESS;
+        msg.btn_state = BTN_VERY_LONG_PRESS;
+        sendTaskMessage(&msg);
+
+        PRINT_LOG("Button pressed at boot, starting commissioning");
+    }
+    
     if (use_display)
     {
         LCD_I2C_setCursor(0, 0);
@@ -434,6 +455,8 @@ void LCD_Task(void *parameter)
             }
             case TASK_CMD_BTN_PRESS:
             {
+                PRINT_LOG("Button press: %u", msg.btn_state);
+
                 // handle press, check if commissioning was started or stopped
                 bool comm_changed = false;
                 is_commissioning = menu_statemachine(msg.btn_state, &comm_changed);
@@ -450,6 +473,7 @@ void LCD_Task(void *parameter)
             }
             default:
             {
+                PRINT_LOG("Unknow message received: %d", msg.cmd);
                 break;
             }
         }

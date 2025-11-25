@@ -108,12 +108,12 @@ typedef struct
 {
   time_t last_connected_utc;
   
-  int32_t current_minutes_12o_clock; // local minutes after 12 o clock position
+  int32_t current_slave_minutes_12o_clock; // local minutes after 12 o clock position
 
   // time related stats
   uint32_t total_pos_time_corrected;
   uint32_t total_neg_time_corrected;
-  uint32_t total_operating_seconds;
+  uint32_t total_operating_seconds; // total time the device was powered
 
   uint32_t mirror_saved_times; // how many times the RAM mirror was persisted
   uint32_t magic_word; // to easily determine if the struct contains valid data
@@ -129,7 +129,7 @@ typedef struct
 // global shared RAM data, which is not persisted
 typedef struct
 {
-  int clock_minutes_diff; // difference to correct time
+  uint32_t operating_seconds; // seconds since last boot
 } ram_shared_t;
 
 //---------------------------------------------------------------------------
@@ -142,6 +142,8 @@ extern char print_buf[MAX_LOG_LEN];
 
 extern ram_mirror_t ram_mirror;
 extern const ram_mirror_t ram_mirror_default;
+extern ram_shared_t ram_shared;
+
 
 /* exported functions */
 void serial_print_custom(void);

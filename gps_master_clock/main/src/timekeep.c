@@ -8,7 +8,7 @@
 #include "custom_main.h"
 #include "bsp.h"
 
-#define TOGGLE_ONBOARD_LED gpio_set_level(GPIO_LED, gpio_get_level(GPIO_LED) ? 0 : 1)
+#define TOGGLE_ONBOARD_LED() do{gpio_set_level(GPIO_LED, gpio_get_level(GPIO_LED) ? 0 : 1);}while(0)
 
 // Set timezone for Europe/Berlin (https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv)
 static const char* timezone_europe_berlin = "CET-1CEST,M3.5.0,M10.5.0/3";
@@ -27,10 +27,12 @@ static void print_stats(void)
         "General:\n"
         "\tFree heap: %lu, minimum free heap: %lu\n"
         "\tTotal corrected: pos:%lus neg:%lus\n"
-        "\tUptime: %lus = %luh = %lud",
+        "\tTotal operating time: %lus = %luh = %lud\n"
+        "\tOperating time since boot: %lus = %luh = %lud\n",
         esp_get_free_heap_size(), esp_get_minimum_free_heap_size(),
         ram_mirror.total_pos_time_corrected, ram_mirror.total_neg_time_corrected,
-        ram_mirror.total_operating_seconds, ram_mirror.total_operating_seconds / 3600, ram_mirror.total_operating_seconds / (3600 * 24)
+        ram_mirror.total_operating_seconds, ram_mirror.total_operating_seconds / 3600, ram_mirror.total_operating_seconds / (3600 * 24),
+        ram_shared.operating_seconds, ram_shared.operating_seconds / 3600, ram_shared.operating_seconds / (3600 * 24)
     );
     uint8_t curr_num_tasks = uxTaskGetNumberOfTasks();
     if (last_num_tasks != curr_num_tasks)
@@ -121,6 +123,7 @@ void TIMEKEEP_Task(void *parameter)
                 case TASK_CMD_SECOND_TICK:
                 {
                     ram_mirror.total_operating_seconds++;
+                    ram_shared.operating_seconds++;
                     if (ram_mirror.total_operating_seconds % 60 == 0)
                     {
                         print_stats();
@@ -134,7 +137,7 @@ void TIMEKEEP_Task(void *parameter)
                     // Toggle LED to indicate activity
                     if (clock_minutes_diff > 0)
                     { // only if not actively pulsing, otherwise it looks weird
-                        TOGGLE_ONBOARD_LED;
+                        TOGGLE_ONBOARD_LED();
                     }
 
                     take_tz_mutex(); // wait until we can manipulate the timezone
@@ -174,7 +177,7 @@ void TIMEKEEP_Task(void *parameter)
                     int target_minutes_12o_clock = target_local_time.tm_hour * 60 + target_local_time.tm_min;
 
                     // determine the current difference
-                    clock_minutes_diff = target_minutes_12o_clock - ram_mirror.current_minutes_12o_clock;
+                    clock_minutes_diff = target_minutes_12o_clock - ram_mirror.current_slave_minutes_12o_clock;
                     clock_minutes_diff = clock_minutes_diff % MINUTES_PER_12H;
 
                     if (clock_minutes_diff > 0)
@@ -205,7 +208,7 @@ void TIMEKEEP_Task(void *parameter)
                     }
 
                     PRINT_LOG("%02ld:%02ld -> %d minutes time difference to target -> %02d:%02d(%02d:%02d)",
-                        ram_mirror.current_minutes_12o_clock / 60, ram_mirror.current_minutes_12o_clock % 60,
+                        ram_mirror.current_slave_minutes_12o_clock / 60, ram_mirror.current_slave_minutes_12o_clock % 60,
                         clock_minutes_diff,
                         target_local_time.tm_hour % 12, target_local_time.tm_min,
                         target_local_time.tm_hour, target_local_time.tm_min);
@@ -220,18 +223,18 @@ void TIMEKEEP_Task(void *parameter)
 
         if (clock_minutes_diff > 0) // no backwards pulses possible
         { // if we come here: do clock pulses
-            TOGGLE_ONBOARD_LED;
+            TOGGLE_ONBOARD_LED();
             gpio_set_level(H_BRIDGE_DIR, !ram_mirror.hbridge_last_pol); // set opposite polarity as last time
             gpio_set_level(H_BRIDGE_EN, 1);
             vTaskDelay(ram_mirror.pulse_len_ms / portTICK_PERIOD_MS);
 
             gpio_set_level(H_BRIDGE_EN, 0);
             gpio_set_level(GPIO_LED, 1);
-            TOGGLE_ONBOARD_LED;
+            TOGGLE_ONBOARD_LED();
             vTaskDelay(ram_mirror.pulse_pause_ms / portTICK_PERIOD_MS);
 
-            ram_mirror.current_minutes_12o_clock++; // one step closer to the target time
-            ram_mirror.current_minutes_12o_clock %= MINUTES_PER_12H; // keep within 12 hour bounds
+            ram_mirror.current_slave_minutes_12o_clock++; // one step closer to the target time
+            ram_mirror.current_slave_minutes_12o_clock %= MINUTES_PER_12H; // keep within 12 hour bounds
             ram_mirror.hbridge_last_pol = !ram_mirror.hbridge_last_pol; // toggle polarity
             clock_minutes_diff--;
         }
