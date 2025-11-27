@@ -2,6 +2,7 @@
 #include "LCM1602.h"
 
 #include "custom_main.h"
+#include "timekeep.h" // to take timezone mutex
 #include "menu_handler.h"
 #include "bsp.h"
 
@@ -38,6 +39,7 @@ enum
     STATUS_CURRENT_UPTIME,
     STATUS_SLAVE_CLOCK,
     STATUS_PHASE_DIFFERENCE,
+    STATUS_LAST_CONNECTED,
     NUM_STATUS_IDX
 };
 
@@ -68,6 +70,17 @@ static const uint8_t back_icon_charmap[] =
     0b11110,
     0b01100,
     0b00100
+};
+static const uint8_t dish_icon_charmap[] =
+{
+    0b00000,
+    0b01000,
+    0b01100,
+    0b00110,
+    0b01011,
+    0b01000,
+    0b11100,
+    0b00000
 };
 
 //---------------------------------------------------------------------------
@@ -146,12 +159,12 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
         }
         case STATUS_CORRECTION_POS:
         {
-            LCD_I2C_printf(SUM_ICO_STR" lag: %8lus", ram_mirror.total_pos_time_corrected);
+            LCD_I2C_printf(SUM_ICO_STR" lag  %8lus", ram_mirror.total_pos_time_corrected);
             break;
         }
         case STATUS_CORRECTION_NEG:
         {
-            LCD_I2C_printf(SUM_ICO_STR" lead:%8lus", ram_mirror.total_neg_time_corrected);
+            LCD_I2C_printf(SUM_ICO_STR" lead %8lus", ram_mirror.total_neg_time_corrected);
             break;
         }
         case STATUS_TOTAL_UPTIME:
@@ -186,12 +199,25 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
         {
             uint8_t hours = ram_mirror.current_slave_minutes_12o_clock / 60;
             uint8_t minutes = ram_mirror.current_slave_minutes_12o_clock % 60;
-            LCD_I2C_printf("Slave Clk: %02u:%02u", hours, minutes);
+            LCD_I2C_printf("Slave Clk  %02u:%02u", hours, minutes);
             break;
         }
         case STATUS_PHASE_DIFFERENCE:
         {
-            LCD_I2C_printf("Phase:  %+6dms", ram_shared.phase_difference_ms);
+            LCD_I2C_printf("Phase   %+6dms", ram_shared.phase_difference_ms);
+            break;
+        }
+        case STATUS_LAST_CONNECTED:
+        {
+            // determine when the last connection happened
+            take_tz_mutex();
+            struct tm lastConn = *localtime(&ram_mirror.last_connected_utc); 
+            give_tz_mutex();
+
+            LCD_I2C_printf(DISH_ICO_STR"con.%02u.%02u %02u:%02u",
+                lastConn.tm_mday, lastConn.tm_mon + 1,
+                lastConn.tm_hour, lastConn.tm_min
+            );
             break;
         }
         default:
@@ -390,6 +416,7 @@ void LCD_Task(void *parameter)
         // for some other reason writing to GRAM only works after the prints above
         LCD_I2C_createChar(GRAM_BACKSLASH_IDX, backslash_charmap);
         LCD_I2C_createChar(GRAM_BACK_ICON_IDX, back_icon_charmap);
+        LCD_I2C_createChar(GRAM_DISH_ICON_IDX, dish_icon_charmap);
 
         vTaskDelay(1000);
     }

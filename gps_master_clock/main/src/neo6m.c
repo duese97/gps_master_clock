@@ -41,6 +41,7 @@ static volatile time_t mcu_utc; // current, locally tracked UTC time of the micr
 // timestamp in microseconds when minute wraparound happened..
 static volatile int64_t minute_wraparound_ISR = 0; // .. in interrupt
 static volatile int64_t minute_wraparound_Task = 0; // .. in task
+static volatile int64_t phase_difference_us = 0; // current difference
 
 static void periodic_timer_callback(void* arg)
 {
@@ -52,7 +53,7 @@ static void periodic_timer_callback(void* arg)
         minute_wraparound_ISR = esp_timer_get_time(); // remember time
         if (minute_wraparound_Task != 0) // we were slower than the task
         {
-            ram_shared.phase_difference_ms = (minute_wraparound_ISR - minute_wraparound_Task)  / 1000;
+            phase_difference_us = minute_wraparound_ISR - minute_wraparound_Task;
             minute_wraparound_Task = 0; // 'ack' the read
         }
     }
@@ -134,19 +135,23 @@ void NEO6M_Task(void *parameter)
             // the local clock. Ideally it should remain relatively constant.
             minute_old = gps_local_time.tm_min;
 
-            // Critical section to determine the difference: if the ISR was faster than this task:
-            // calculate the difference
+            // Critical section to determine the difference
             portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
             taskENTER_CRITICAL(&mux);
             minute_wraparound_Task = esp_timer_get_time(); // make snapshot in any case
-            if (minute_wraparound_ISR != 0)
+            if (minute_wraparound_ISR != 0) // if the ISR was faster than this task: calculate the difference
             {
-                ram_shared.phase_difference_ms = (minute_wraparound_ISR - minute_wraparound_Task)  / 1000;
+                // Since the phase difference is not accumulated over a long time it should be fine to
+                // base the difference off the internal ESP timer. It will be subjected to the same drift
+                // or inaccuracies as the seconds timer, but within a minute it should be negligible.
+                phase_difference_us = minute_wraparound_ISR - minute_wraparound_Task;
                 minute_wraparound_ISR = 0; // 'ack' the read
             }
+            // Calculate the difference regardless, worst case is that this is the difference from the last minute
+            ram_shared.phase_difference_ms = phase_difference_us / 1000;
             taskEXIT_CRITICAL(&mux);
-
-            PRINT_LOG("Phase difference local clock <-> GPS: %ldms", ram_shared.phase_difference_ms);
+            
+            PRINT_LOG("Phase difference (local clock - GPS clock): %ldms", ram_shared.phase_difference_ms);
         }
 
         if (lock_state != GPS_LOCKED) // avoid sending same message over and over, if lock did not change
@@ -155,25 +160,30 @@ void NEO6M_Task(void *parameter)
             msg_locked.lock_state = GPS_LOCKED;
             sendTaskMessage(&msg_locked);
         }
-
+        
         // determine time difference between local clock and received time
-        double clock_diff = difftime(mcu_utc, ram_mirror.last_connected_utc);
-        if (fabs(clock_diff) > MAX_ALLOWED_LOCAL_CLOCK_DRIFT_SECONDS)
+        int32_t clock_diff_utc_sec = difftime(mcu_utc, ram_mirror.last_connected_utc);
+
+        // Reason to adjust the timer: the UTC time is simply wrong (transmission error, etc.)
+        // or the local timer leads/lags too much
+        bool adjust_utc_diff = abs(clock_diff_utc_sec) > MAX_ALLOWED_LOCAL_CLOCK_DRIFT_SECONDS;
+        if (adjust_utc_diff)
         { // too great, adjust
             ESP_ERROR_CHECK(esp_timer_stop(periodic_timer)); // halt timer, it does read-modify-write of the variable (not atomic)!
             mcu_utc = ram_mirror.last_connected_utc; // set new UTC timestamp
+            minute_wraparound_Task = 0; minute_wraparound_ISR = 0; // reset the timestamps
             ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US)); // restart timer
 
-            PRINT_LOG("Local clock drifted by: %lf, halting and re-adjusting to %lld", clock_diff, mcu_utc);
+            PRINT_LOG("Local clock drifted by: %ld, halting and re-adjusting to %lld", clock_diff_utc_sec, mcu_utc);
 
             // Accumulate the total drifted time into separate counters
-            if (clock_diff > 0)
+            if (clock_diff_utc_sec > 0)
             {
-                ram_mirror.total_pos_time_corrected += clock_diff;
+                ram_mirror.total_pos_time_corrected += clock_diff_utc_sec;
             }
             else
             {
-                ram_mirror.total_neg_time_corrected += -clock_diff;
+                ram_mirror.total_neg_time_corrected += -clock_diff_utc_sec;
             }
         }
     }

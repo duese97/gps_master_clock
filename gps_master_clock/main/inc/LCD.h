@@ -4,14 +4,22 @@
 #include <stdbool.h>
 
 // custom characters
-#define GRAM_BACKSLASH_IDX      1
-#define GRAM_BACK_ICON_IDX      2
+enum
+{
+    // avoid starting at 0 (which is technically available). this would
+    // cause issues with string related functions, where the custom
+    // characters are used
+    GRAM_BACKSLASH_IDX = 1,
+    GRAM_BACK_ICON_IDX,
+    GRAM_DISH_ICON_IDX
+};
 
 // special chars outside of normal ASCII range
 #define SUM_ICON_CHAR           0xF6
 
 // helper for easier integration into LCD strings
 #define BACK_ICO_STR            "\x02"
+#define DISH_ICO_STR            "\x03"
 #define SUM_ICO_STR             "\xF6"
 
 // exported functions
