@@ -14,16 +14,19 @@
 #define NUM_COLUMNS 16
 #define NUM_ROWS 2
 
-#define REFRESH_INTERVAL_MS     ( 500 / portTICK_PERIOD_MS ) 
+#define REFRESH_INTERVAL_MS             ( 500 / portTICK_PERIOD_MS ) 
 
 // '13:08:00 15.11.2025 DST: 0    ' = 26 chars + 4 spaces + 1 null
-#define MAX_TIME_PRINT_LEN 30
+#define MAX_TIME_PRINT_LEN              30
 
-#define DEBOUNCE_DURATION_MS    ( 50 / portTICK_PERIOD_MS )
+#define DEBOUNCE_DURATION_MS            ( 50 / portTICK_PERIOD_MS )
 // every press length between DEBOUNCE_DURATION_MS..LONG_PRESS_DURATION_MS is
 // considered a short press
-#define LONG_PRESS_DURATION_MS  ( 500 / portTICK_PERIOD_MS )
-#define VERY_LONG_PRESS_DURATION_MS (3000 / portTICK_PERIOD_MS )
+#define LONG_PRESS_DURATION_MS          ( 500 / portTICK_PERIOD_MS )
+#define VERY_LONG_PRESS_DURATION_MS     (3000 / portTICK_PERIOD_MS )
+
+#define DISPLAY_TURN_OFF_INITAL_MS      (10 * 60) // when booting we might want to stay on a bit longer
+#define DISPLAY_TURN_OFF_MS             (1 * 60)
 
 //---------------------------------------------------------------------------
 // Enums
@@ -214,7 +217,7 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
             struct tm lastConn = *localtime(&ram_mirror.last_connected_utc); 
             give_tz_mutex();
 
-            LCD_I2C_printf(DISH_ICO_STR"con.%02u.%02u %02u:%02u",
+            LCD_I2C_printf(DISH_ICO_STR" @  %02u.%02u %02u:%02u",
                 lastConn.tm_mday, lastConn.tm_mon + 1,
                 lastConn.tm_hour, lastConn.tm_min
             );
@@ -365,6 +368,8 @@ void LCD_Task(void *parameter)
     struct tm tm; // local time struct
     bool is_commissioning = false;
 
+    uint32_t turn_off_time = ESP_IDF_MILLIS() + DISPLAY_TURN_OFF_INITAL_MS; // set inital timeout when screen shall turn off
+
     if (LCD_I2C_begin(NUM_COLUMNS, NUM_ROWS) != ESP_OK)
     { // in case no display was found
         PRINT_LOG("Unable to setup LCD I2C!");
@@ -477,6 +482,12 @@ void LCD_Task(void *parameter)
                 {
                     continue;
                 }
+                if((turn_off_time != 0) && (ESP_IDF_MILLIS() > turn_off_time))
+                {
+                    turn_off_time = 0; // "ack", so that we do not need to come here over and over
+                    LCD_I2C_backlight(false);
+                    PRINT_LOG("Turning off display due to inactivity");
+                }
 
                 if (is_commissioning == false)
                 {
@@ -491,6 +502,9 @@ void LCD_Task(void *parameter)
             case TASK_CMD_BTN_PRESS:
             {
                 PRINT_LOG("Button press: %u", msg.btn_state);
+
+                LCD_I2C_backlight(true); // enable backlight (if it was not already on)
+                turn_off_time = ESP_IDF_MILLIS() + DISPLAY_TURN_OFF_MS;
 
                 // handle press, check if commissioning was started or stopped
                 bool comm_changed = false;
