@@ -66,6 +66,10 @@
 #define STACKSIZE_LCD       4096
 #define STACKSIZE_PWR       2028
 
+// testing utility
+#define MAX_COMMAND_LENGTH  16
+
+
 /* TASK */
 enum
 {
@@ -516,4 +520,39 @@ void app_main(void)
     taskHandleTIMEKEEP  = CREATE_TASK_STATIC(TIMEKEEP);
     taskHandleLCD       = CREATE_TASK_STATIC(LCD);
     taskHandlePWR       = CREATE_TASK_STATIC(PWR);
+
+    int received_bytes = 0;
+    char command_buf[MAX_COMMAND_LENGTH + 1 /*NULL*/];
+    char buf;
+    int res;
+    
+    while(1)
+    {
+        res = uart_read_bytes(LOGGING_UART_PORT, &buf, sizeof(buf), 1000);
+        if (res <= 0)
+        { // timeout or error
+            continue;
+        }
+        if (received_bytes >= MAX_COMMAND_LENGTH) // sanity check: do not access beyond buffer boundaries
+        {
+            received_bytes = 0;
+            continue;
+        }
+        command_buf[received_bytes] = buf; // copy character
+        received_bytes++; // advance to next position
+
+        if (buf == '\t')
+        {
+            command_buf[received_bytes] = '\0'; // properly terminate
+            PRINT_LOG("%s", command_buf);
+
+            int cmd_num = 0;
+            res = sscanf(command_buf, "TEST:%d", &cmd_num);
+            if (res == 1 && cmd_num == 0)
+            {
+                while(1){}; // software lockup
+            }
+            received_bytes = 0; // reset counter to start fresh again
+        } // else: await more data
+    }
 }

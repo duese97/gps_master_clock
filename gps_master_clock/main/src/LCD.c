@@ -25,8 +25,8 @@
 #define LONG_PRESS_DURATION_MS          ( 500 / portTICK_PERIOD_MS )
 #define VERY_LONG_PRESS_DURATION_MS     (3000 / portTICK_PERIOD_MS )
 
-#define DISPLAY_TURN_OFF_INITAL_MS      (10 * 60) // when booting we might want to stay on a bit longer
-#define DISPLAY_TURN_OFF_MS             (1 * 60)
+#define DISPLAY_TURN_OFF_INITAL_MS      (10 * 60 * 1000) // when booting we might want to stay on a bit longer
+#define DISPLAY_TURN_OFF_MS             (1 * 60 * 1000)
 
 //---------------------------------------------------------------------------
 // Enums
