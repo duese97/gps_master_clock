@@ -173,12 +173,12 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
         }
         case STATUS_CORRECTION_POS:
         {
-            LCD_I2C_printf(SUM_ICO_STR" lag  %8lus", ram_mirror.total_pos_time_corrected);
+            LCD_I2C_printf(SUM_ICO_STR" lag %8lums", ram_mirror.total_pos_time_corrected_ms);
             break;
         }
         case STATUS_CORRECTION_NEG:
         {
-            LCD_I2C_printf(SUM_ICO_STR" lead %8lus", ram_mirror.total_neg_time_corrected);
+            LCD_I2C_printf(SUM_ICO_STR" lead%8lums", ram_mirror.total_neg_time_corrected_ms);
             break;
         }
         case STATUS_TOTAL_UPTIME:
@@ -223,14 +223,8 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
         }
         case STATUS_LAST_CONNECTED:
         {
-            // determine when the last connection happened
-            take_tz_mutex();
-            struct tm lastConn = *localtime(&ram_mirror.last_connected_utc); 
-            give_tz_mutex();
-
-            LCD_I2C_printf(DISH_ICO_STR WAVE_ICO_STR " @ %02u.%02u %02u:%02u",
-                lastConn.tm_mday, lastConn.tm_mon + 1,
-                lastConn.tm_hour, lastConn.tm_min
+            LCD_I2C_printf(DISH_ICO_STR WAVE_ICO_STR " %8lds ago",
+                (int32_t)ram_shared.gps_time_age
             );
             break;
         }
@@ -497,6 +491,7 @@ void LCD_Task(void *parameter)
                 if((turn_off_time != 0) && (ESP_IDF_MILLIS() > turn_off_time))
                 {
                     turn_off_time = 0; // "ack", so that we do not need to come here over and over
+                    use_display = false;
                     LCD_I2C_backlight(false);
                     PRINT_LOG("Turning off display due to inactivity");
                 }
@@ -515,6 +510,7 @@ void LCD_Task(void *parameter)
             {
                 PRINT_LOG("Button press: %u", msg.btn_state);
 
+                use_display = true;
                 LCD_I2C_backlight(true); // enable backlight (if it was not already on)
                 turn_off_time = ESP_IDF_MILLIS() + DISPLAY_TURN_OFF_MS;
 

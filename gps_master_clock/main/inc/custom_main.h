@@ -70,6 +70,7 @@ typedef enum
   
   TASK_CMD_LOCAL_TIME,
   TASK_CMD_SHUTDOWN,
+
   NUM_TASK_CMD
 } task_cmd_t;
 
@@ -115,8 +116,8 @@ typedef struct
   int32_t current_slave_minutes_12o_clock; // local minutes after 12 o clock position
 
   // time related stats
-  uint32_t total_pos_time_corrected;
-  uint32_t total_neg_time_corrected;
+  uint32_t total_pos_time_corrected_ms;
+  uint32_t total_neg_time_corrected_ms;
   uint32_t total_operating_seconds; // total time the device was powered
 
   uint32_t mirror_saved_times; // how many times the RAM mirror was persisted
@@ -133,6 +134,7 @@ typedef struct
 // global shared RAM data, which is not persisted
 typedef struct
 {
+  time_t gps_time_age;
   uint32_t operating_seconds; // seconds since last boot
   int32_t phase_difference_ms;
 } ram_shared_t;
@@ -178,4 +180,8 @@ esp_err_t store_ram_mirror(void);
     xSemaphoreGive(xUartSemaphore);                                                         \
   } while (0)
 
+#define SEC_TO_MS(sec)    (sec * 1000)
+#define USEC_TO_MS(usec)  (usec / 1000)
+#define SEC_TO_H(sec)     (sec / 3600)
+#define SEC_TO_DAY(sec)   (sec / 3600 / 24)
 #endif // _CUSTOM_MAIN_H_

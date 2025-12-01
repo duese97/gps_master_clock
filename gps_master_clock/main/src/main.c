@@ -262,14 +262,14 @@ static esp_err_t inital_nvs_load(bool soft_reset)
     PRINT_LOG(
         "Using config:\n"
         "\tcurrent_slave_minutes_12o_clock: %ld (%02ld:%02ld)\n"
-        "\ttotal_pos_time_corrected: %lu total_neg_time_corrected: %lu\n"
+        "\ttotal_pos_time_corrected: %lu total_neg_time_corrected_ms: %lu\n"
         "\tmirror_saved_times: %lu\n"
         "\tpulse_len_ms: %u pulse_pause_ms: %u\n"
         "\tlast_connected_utc:%lld"
         "\thbridge_last_pol:%u"
         "\tmagic_word: 0x%08lX",
         ram_mirror.current_slave_minutes_12o_clock, ram_mirror.current_slave_minutes_12o_clock / 60, ram_mirror.current_slave_minutes_12o_clock % 60,
-        ram_mirror.total_pos_time_corrected, ram_mirror.total_neg_time_corrected,
+        ram_mirror.total_pos_time_corrected_ms, ram_mirror.total_neg_time_corrected_ms,
         ram_mirror.mirror_saved_times,
         ram_mirror.pulse_len_ms, ram_mirror.pulse_pause_ms,
         ram_mirror.last_connected_utc,

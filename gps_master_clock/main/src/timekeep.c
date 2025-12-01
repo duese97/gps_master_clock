@@ -30,9 +30,9 @@ static void print_stats(void)
         "\tTotal operating time: %lus = %luh = %lud\n"
         "\tOperating time since boot: %lus = %luh = %lud\n",
         esp_get_free_heap_size(), esp_get_minimum_free_heap_size(),
-        ram_mirror.total_pos_time_corrected, ram_mirror.total_neg_time_corrected,
-        ram_mirror.total_operating_seconds, ram_mirror.total_operating_seconds / 3600, ram_mirror.total_operating_seconds / (3600 * 24),
-        ram_shared.operating_seconds, ram_shared.operating_seconds / 3600, ram_shared.operating_seconds / (3600 * 24)
+        ram_mirror.total_pos_time_corrected_ms, ram_mirror.total_neg_time_corrected_ms,
+        ram_mirror.total_operating_seconds, SEC_TO_H(ram_mirror.total_operating_seconds), SEC_TO_DAY(ram_mirror.total_operating_seconds),
+        ram_shared.operating_seconds, SEC_TO_H(ram_shared.operating_seconds), SEC_TO_DAY(ram_shared.operating_seconds)
     );
     uint8_t curr_num_tasks = uxTaskGetNumberOfTasks();
     if (last_num_tasks != curr_num_tasks)
@@ -94,7 +94,7 @@ void TIMEKEEP_Task(void *parameter)
 
     while(1)
     {
-        if (receiveTaskMessage(TASK_TIMEKEEP, 10, &msg) == true)
+        if (receiveTaskMessage(TASK_TIMEKEEP, 1, &msg) == true)
         {
             switch(msg.cmd)
             {

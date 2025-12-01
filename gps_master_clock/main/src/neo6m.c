@@ -18,6 +18,8 @@
 #define SECOND_TIMER_PERIOD_US 1000000ULL
 #define UART_BLOCK_TICKS 2000
 
+#define NUM_CLOCKDIFF_EVALUATIONS   5
+
 /* Configure parameters of an UART driver, communication pins and install the driver */
 const uart_config_t uart_config = {
     .baud_rate = 9600,
@@ -43,11 +45,16 @@ static volatile int64_t minute_wraparound_ISR = 0; // .. in interrupt
 static volatile int64_t minute_wraparound_Task = 0; // .. in task
 static volatile int64_t phase_difference_us = 0; // current difference
 
+
+static int64_t diffs[NUM_CLOCKDIFF_EVALUATIONS];
+
 static void periodic_timer_callback(void* arg)
 {
-    static task_msg_t msg = {.dst = TASK_TIMEKEEP, .cmd = TASK_CMD_SECOND_TICK }; // prepare message
+    static task_msg_t msg = {.dst = TASK_TIMEKEEP, .cmd = TASK_CMD_SECOND_TICK }; // prepare message for timekeep
+    
     mcu_utc++;
     msg.utc_time = mcu_utc;
+    ram_shared.gps_time_age = mcu_utc - ram_mirror.last_connected_utc; // determine when the last connection happened
     if (mcu_utc % 60 == 0)
     {
         minute_wraparound_ISR = esp_timer_get_time(); // remember time
@@ -148,7 +155,7 @@ void NEO6M_Task(void *parameter)
                 minute_wraparound_ISR = 0; // 'ack' the read
             }
             // Calculate the difference regardless, worst case is that this is the difference from the last minute
-            ram_shared.phase_difference_ms = phase_difference_us / 1000;
+            ram_shared.phase_difference_ms = USEC_TO_MS(phase_difference_us);
             taskEXIT_CRITICAL(&mux);
             
             PRINT_LOG("Phase difference (local clock - GPS clock): %ldms", ram_shared.phase_difference_ms);
@@ -179,11 +186,11 @@ void NEO6M_Task(void *parameter)
             // Accumulate the total drifted time into separate counters
             if (clock_diff_utc_sec > 0)
             {
-                ram_mirror.total_pos_time_corrected += clock_diff_utc_sec;
+                ram_mirror.total_pos_time_corrected_ms += SEC_TO_MS(clock_diff_utc_sec);
             }
             else
             {
-                ram_mirror.total_neg_time_corrected += -clock_diff_utc_sec;
+                ram_mirror.total_neg_time_corrected_ms += -SEC_TO_MS(clock_diff_utc_sec);
             }
         }
     }
