@@ -86,6 +86,7 @@ void TIMEKEEP_Task(void *parameter)
     task_msg_t msg; // scratch buffer for receiving task messages
     char* timezone_env_ptr = NULL; // points to heap, where timezone string will be buffered
     bool commissioning = false;
+    bool ignore_sec_tick = false;
 
     gpio_set_direction(GPIO_LED, GPIO_MODE_INPUT_OUTPUT);
     gpio_set_direction(H_BRIDGE_DIR, GPIO_MODE_INPUT_OUTPUT);
@@ -120,8 +121,17 @@ void TIMEKEEP_Task(void *parameter)
                     
                     break;
                 }
+                case TASK_CMD_SIMULATE_SECOND_TICK:
+                    ignore_sec_tick = true;
+                // fall through
                 case TASK_CMD_SECOND_TICK:
                 {
+#if USE_TESTCODE == 1
+                    if (ignore_sec_tick == true && msg.cmd == TASK_CMD_SECOND_TICK)
+                    { // special case: we are testing the seconds tick. skip the "normal" message from the IRQ
+                        continue;
+                    }
+#endif // USE_TESTCODE == 1
                     ram_mirror.total_operating_seconds++;
                     ram_shared.operating_seconds++;
                     if (ram_mirror.total_operating_seconds % 60 == 0)

@@ -40,6 +40,9 @@
 #define NVS_NAMESPACE   "STORAGE"
 #define KEY_RAM_MIRROR  "RM"
 
+#define USE_TESTCODE 1
+
+
 //---------------------------------------------------------------------------
 // Enums
 //---------------------------------------------------------------------------
@@ -58,6 +61,7 @@ typedef enum
 
   TASK_CMD_COMMISSIONING,
 
+  TASK_CMD_SIMULATE_SECOND_TICK,
   TASK_CMD_SLAVE_ADVANCE_MINUTES,
 
   TASK_CMD_GPS_LOCK_STATE,

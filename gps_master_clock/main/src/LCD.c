@@ -85,6 +85,17 @@ static const uint8_t dish_icon_charmap[] =
     0b11100,
     0b00000
 };
+static const uint8_t wave_icon_charmap[] =
+{
+    0b10101,
+    0b10100,
+    0b10011,
+    0b01000,
+    0b00111,
+    0b00000,
+    0b00000,
+    0b00000
+};
 
 //---------------------------------------------------------------------------
 // Local variables
@@ -217,7 +228,7 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
             struct tm lastConn = *localtime(&ram_mirror.last_connected_utc); 
             give_tz_mutex();
 
-            LCD_I2C_printf(DISH_ICO_STR" @  %02u.%02u %02u:%02u",
+            LCD_I2C_printf(DISH_ICO_STR WAVE_ICO_STR " @ %02u.%02u %02u:%02u",
                 lastConn.tm_mday, lastConn.tm_mon + 1,
                 lastConn.tm_hour, lastConn.tm_min
             );
@@ -422,6 +433,7 @@ void LCD_Task(void *parameter)
         LCD_I2C_createChar(GRAM_BACKSLASH_IDX, backslash_charmap);
         LCD_I2C_createChar(GRAM_BACK_ICON_IDX, back_icon_charmap);
         LCD_I2C_createChar(GRAM_DISH_ICON_IDX, dish_icon_charmap);
+        LCD_I2C_createChar(GRAM_WAVE_ICON_IDX, wave_icon_charmap);
 
         vTaskDelay(1000);
     }

@@ -298,7 +298,7 @@ static const main_menu_t main_menu[] =
 {
     [MENU_SEL_EXIT] =
     {
-        .selector_str = ">Exit"
+        .selector_str = ">Save & Exit"
     },
     [MENU_SEL_MASTER_ADVANCE] = 
     {

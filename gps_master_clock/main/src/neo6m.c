@@ -166,7 +166,7 @@ void NEO6M_Task(void *parameter)
 
         // Reason to adjust the timer: the UTC time is simply wrong (transmission error, etc.)
         // or the local timer leads/lags too much
-        bool adjust_utc_diff = abs(clock_diff_utc_sec) > MAX_ALLOWED_LOCAL_CLOCK_DRIFT_SECONDS;
+        bool adjust_utc_diff = abs(clock_diff_utc_sec) >= MAX_ALLOWED_LOCAL_CLOCK_DRIFT_SECONDS;
         if (adjust_utc_diff)
         { // too great, adjust
             ESP_ERROR_CHECK(esp_timer_stop(periodic_timer)); // halt timer, it does read-modify-write of the variable (not atomic)!

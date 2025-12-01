@@ -69,6 +69,12 @@
 // testing utility
 #define MAX_COMMAND_LENGTH  16
 
+enum
+{
+    TESTCODE_SW_LOCKUP = 0,
+    TESTCODE_INC_HOUR,
+    TESTCODE_DEC_HOUR,
+};
 
 /* TASK */
 enum
@@ -117,7 +123,7 @@ static const uart_config_t uart_config = {
 
 // Place the ram mirror into RTC RAM. In case of a SW failure we could be able to
 // retrieve the last saved values and store them in NVS.
-RTC_DATA_ATTR ram_mirror_t ram_mirror;
+RTC_NOINIT_ATTR ram_mirror_t ram_mirror;
 
 
 ram_shared_t ram_shared;
@@ -203,16 +209,18 @@ static esp_err_t inital_nvs_load(bool soft_reset)
         // Check if the RAM mirror can be used
         if (soft_reset)
         { // there is hope to load a valid ram mirror
+            PRINT_LOG("Detected soft reset");
             if (ram_mirror.magic_word == RAM_MIRROR_VALID_MAGIC)
             { // back up the data, in case a future power cycle happens
-                err = save_nvs_data(nvs_handle);
                 PRINT_LOG("Trying to save valid RAM mirror to NVS...");
+                err = save_nvs_data(nvs_handle);
             }
             else
             { // try to read from NVS
+                PRINT_LOG("RAM config could be corrupt (magic word is 0x%08lX), trying to load NVS to RAM mirror...",
+                    ram_mirror.magic_word);
                 err = load_nvs_data(nvs_handle);
                 loaded_from_nvs = true;
-                PRINT_LOG("Trying to load NVS to RAM mirror...");
             }
         }
         else // 'hard' reset, do not even try to load ram mirror
@@ -258,13 +266,15 @@ static esp_err_t inital_nvs_load(bool soft_reset)
         "\tmirror_saved_times: %lu\n"
         "\tpulse_len_ms: %u pulse_pause_ms: %u\n"
         "\tlast_connected_utc:%lld"
-        "\thbridge_last_pol:%u",
+        "\thbridge_last_pol:%u"
+        "\tmagic_word: 0x%08lX",
         ram_mirror.current_slave_minutes_12o_clock, ram_mirror.current_slave_minutes_12o_clock / 60, ram_mirror.current_slave_minutes_12o_clock % 60,
         ram_mirror.total_pos_time_corrected, ram_mirror.total_neg_time_corrected,
         ram_mirror.mirror_saved_times,
         ram_mirror.pulse_len_ms, ram_mirror.pulse_pause_ms,
         ram_mirror.last_connected_utc,
-        ram_mirror.hbridge_last_pol
+        ram_mirror.hbridge_last_pol,
+        ram_mirror.magic_word
     );
 
     PRINT_LOG("Closing NVS");
@@ -301,6 +311,11 @@ static void wait_shutdown(void)
             done &= tmpStat.eCurrentState == eSuspended;
         }
     }
+}
+
+void esp_task_wdt_isr_user_handler(void)
+{
+    esp_restart();
 }
 
 //---------------------------------------------------------------------------
@@ -478,6 +493,79 @@ void PWR_Task(void *parameter)
     }
 }
 
+static void await_and_handle_testcodes(void)
+{
+#if USE_TESTCODE == 1
+    int received_bytes = 0;
+    char command_buf[MAX_COMMAND_LENGTH + 1 /*NULL*/];
+    char buf;
+    int res;
+
+    PRINT_LOG(
+        "ONLY FOR TESTING!!!\n"
+        "\tWaiting for input of firmware test codes, to simulate errors.\n"
+        "\tSend the following commands in the quotes to accomplish a function:\n"
+        "\t\t'TEST:0\\t' -> lockup software to simulate watchdog triggering\n"
+        "\t\t'TEST:1\\t' -> simulate time jumping by +1 hour\n"
+        "\t\t'TEST:2\\t' -> simulate time jumping by -1 hour\n"
+    );
+    
+    while(1)
+    {
+        // wait for incoming data
+        res = uart_read_bytes(LOGGING_UART_PORT, &buf, sizeof(buf), 1000);
+        if (res <= 0)
+        { // timeout or error
+            continue;
+        }
+        if (received_bytes >= MAX_COMMAND_LENGTH) // sanity check: do not access beyond buffer boundaries
+        {
+            received_bytes = 0;
+            continue;
+        }
+        command_buf[received_bytes] = buf; // copy character
+        received_bytes++; // advance to next position
+
+        if (buf == '\t') // check for terminator
+        {
+            command_buf[received_bytes] = '\0'; // properly terminate
+            PRINT_LOG("Received command: '%s'", command_buf);
+
+            int cmd_num = 0;
+            res = sscanf(command_buf, "TEST:%d", &cmd_num); // parse it
+            if (res != 1)
+            {
+                // does not match, ignore
+            }
+            else if (cmd_num == TESTCODE_SW_LOCKUP)
+            {
+                while(1){}; // software lockup
+            }
+            else if (cmd_num == TESTCODE_INC_HOUR)
+            {
+                // prepare message
+                task_msg_t msg = {
+                    .dst = TASK_TIMEKEEP,
+                    .cmd = TASK_CMD_SIMULATE_SECOND_TICK,
+                    .utc_time = ram_mirror.last_connected_utc + 3600
+                };
+                sendTaskMessage(&msg);
+            }
+            else if (cmd_num == TESTCODE_DEC_HOUR)
+            {
+                // prepare message
+                task_msg_t msg = { .dst = TASK_TIMEKEEP,
+                    .cmd = TASK_CMD_SIMULATE_SECOND_TICK,
+                    .utc_time = ram_mirror.last_connected_utc - 3600
+                };
+                sendTaskMessage(&msg);
+            }
+            received_bytes = 0; // reset counter to start fresh again
+        } // else: await more data
+    }
+#endif // USE_TESTCODE == 1
+}
+
 void app_main(void)
 {
     static gpio_num_t pwr_good_io = POWER_GOOD_IO;
@@ -521,38 +609,5 @@ void app_main(void)
     taskHandleLCD       = CREATE_TASK_STATIC(LCD);
     taskHandlePWR       = CREATE_TASK_STATIC(PWR);
 
-    int received_bytes = 0;
-    char command_buf[MAX_COMMAND_LENGTH + 1 /*NULL*/];
-    char buf;
-    int res;
-    
-    while(1)
-    {
-        res = uart_read_bytes(LOGGING_UART_PORT, &buf, sizeof(buf), 1000);
-        if (res <= 0)
-        { // timeout or error
-            continue;
-        }
-        if (received_bytes >= MAX_COMMAND_LENGTH) // sanity check: do not access beyond buffer boundaries
-        {
-            received_bytes = 0;
-            continue;
-        }
-        command_buf[received_bytes] = buf; // copy character
-        received_bytes++; // advance to next position
-
-        if (buf == '\t')
-        {
-            command_buf[received_bytes] = '\0'; // properly terminate
-            PRINT_LOG("%s", command_buf);
-
-            int cmd_num = 0;
-            res = sscanf(command_buf, "TEST:%d", &cmd_num);
-            if (res == 1 && cmd_num == 0)
-            {
-                while(1){}; // software lockup
-            }
-            received_bytes = 0; // reset counter to start fresh again
-        } // else: await more data
-    }
+    await_and_handle_testcodes();
 }

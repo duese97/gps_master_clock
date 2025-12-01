@@ -11,7 +11,8 @@ enum
     // characters are used
     GRAM_BACKSLASH_IDX = 1,
     GRAM_BACK_ICON_IDX,
-    GRAM_DISH_ICON_IDX
+    GRAM_DISH_ICON_IDX,
+    GRAM_WAVE_ICON_IDX,
 };
 
 // special chars outside of normal ASCII range
@@ -20,6 +21,7 @@ enum
 // helper for easier integration into LCD strings
 #define BACK_ICO_STR            "\x02"
 #define DISH_ICO_STR            "\x03"
+#define WAVE_ICO_STR            "\x04"
 #define SUM_ICO_STR             "\xF6"
 
 // exported functions
