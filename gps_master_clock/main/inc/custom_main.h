@@ -50,6 +50,7 @@ typedef enum
 {
   TASK_LCD,
   TASK_TIMEKEEP,
+  TASK_TIMER,
 } task_type_t;
 
 
@@ -67,7 +68,8 @@ typedef enum
   TASK_CMD_GPS_LOCK_STATE,
   TASK_CMD_BTN_PRESS,
   TASK_CMD_REFRESH_LCD,
-  
+
+  TASK_CMD_GPS_TIME,
   TASK_CMD_LOCAL_TIME,
   TASK_CMD_SHUTDOWN,
 
@@ -99,7 +101,11 @@ typedef struct
   task_cmd_t cmd;
   union // payload, can be unused
   {
-    time_t utc_time;
+    struct
+    {
+      time_t utc_time;
+      uint64_t us_timestamp;
+    };
     GPS_LOCK_STATE_t lock_state;
     struct tm local_time;
     btn_state_t btn_state;
@@ -136,7 +142,7 @@ typedef struct
 {
   time_t gps_time_age;
   uint32_t operating_seconds; // seconds since last boot
-  int32_t phase_difference_ms;
+  int64_t phase_difference_us;
 } ram_shared_t;
 
 //---------------------------------------------------------------------------
@@ -180,8 +186,11 @@ esp_err_t store_ram_mirror(void);
     xSemaphoreGive(xUartSemaphore);                                                         \
   } while (0)
 
+#define SEC_TO_US(sec)    (sec * 1000ULL * 1000ULL)
 #define SEC_TO_MS(sec)    (sec * 1000)
 #define USEC_TO_MS(usec)  (usec / 1000)
+#define USEC_TO_S(usec)   (usec / 1000ULL / 1000ULL)
 #define SEC_TO_H(sec)     (sec / 3600)
 #define SEC_TO_DAY(sec)   (sec / 3600 / 24)
+
 #endif // _CUSTOM_MAIN_H_

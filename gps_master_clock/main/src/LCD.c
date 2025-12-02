@@ -218,7 +218,7 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
         }
         case STATUS_PHASE_DIFFERENCE:
         {
-            LCD_I2C_printf("Phase   %+6dms", ram_shared.phase_difference_ms);
+            LCD_I2C_printf("Phase   %+6dms", USEC_TO_MS(ram_shared.phase_difference_us));
             break;
         }
         case STATUS_LAST_CONNECTED:

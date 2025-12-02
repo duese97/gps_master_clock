@@ -65,6 +65,7 @@
 #define STACKSIZE_TIMEKEEP  2028
 #define STACKSIZE_LCD       4096
 #define STACKSIZE_PWR       2028
+#define STACKSIZE_TIMER     2048
 
 // testing utility
 #define MAX_COMMAND_LENGTH  16
@@ -82,6 +83,7 @@ enum
     // priorities (higher number = higher prio)
     TASK_PRIO_LCD = 1,
     TASK_PRIO_TIMEKEEP,
+    TASK_PRIO_TIMER,
     TASK_PRIO_NEO6M,
     TASK_PRIO_PWR,
 };
@@ -89,6 +91,7 @@ enum
 // task stacks, task handles (for inter task communication) and messaging
 SETUP_TASK_VARS(LCD, STACKSIZE_LCD, QUEUE_STORAGE_GENERAL)
 SETUP_TASK_VARS(TIMEKEEP, STACKSIZE_TIMEKEEP, QUEUE_STORAGE_GENERAL)
+SETUP_TASK_VARS(TIMER, STACKSIZE_TIMER, QUEUE_STORAGE_GENERAL)
 SETUP_TASK_VARS_NO_QUEUE(NEO6M, STACKSIZE_NEO6M)
 SETUP_TASK_VARS_NO_QUEUE(PWR, STACKSIZE_PWR)
 
@@ -97,6 +100,7 @@ static const QueueHandle_t *handleLookup[] =
 {
         [TASK_LCD]      = &queueHandleLCD,
         [TASK_TIMEKEEP] = &queueHandleTIMEKEEP,
+        [TASK_TIMER]    = &queueHandleTIMER,
 };
 
 // for logging
@@ -602,10 +606,12 @@ void app_main(void)
     }
 
     SETUP_QUEUE(TIMEKEEP, QUEUE_LEN_GENERAL);
+    SETUP_QUEUE(TIMER, QUEUE_LEN_GENERAL);
     SETUP_QUEUE(LCD, QUEUE_LEN_GENERAL);
 
     taskHandleNEO6M     = CREATE_TASK_STATIC(NEO6M);
     taskHandleTIMEKEEP  = CREATE_TASK_STATIC(TIMEKEEP);
+    taskHandleTIMER     = CREATE_TASK_STATIC(TIMER);
     taskHandleLCD       = CREATE_TASK_STATIC(LCD);
     taskHandlePWR       = CREATE_TASK_STATIC(PWR);
 

@@ -94,7 +94,8 @@ void TIMEKEEP_Task(void *parameter)
 
     while(1)
     {
-        if (receiveTaskMessage(TASK_TIMEKEEP, 1, &msg) == true)
+        uint32_t wait_time = clock_minutes_diff != 0 ? 0 : portMAX_DELAY; // if there are pulses to be done -> skip the wait for new messages
+        if (receiveTaskMessage(TASK_TIMEKEEP, wait_time, &msg) == true)
         {
             switch(msg.cmd)
             {
@@ -142,12 +143,6 @@ void TIMEKEEP_Task(void *parameter)
                     if (commissioning == true) // if commissioning right now -> skip all of the handling
                     {
                         continue;
-                    }
-
-                    // Toggle LED to indicate activity
-                    if (clock_minutes_diff > 0)
-                    { // only if not actively pulsing, otherwise it looks weird
-                        TOGGLE_ONBOARD_LED();
                     }
 
                     take_tz_mutex(); // wait until we can manipulate the timezone
