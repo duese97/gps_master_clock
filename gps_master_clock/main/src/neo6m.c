@@ -18,7 +18,7 @@
 #define SECOND_TIMER_PERIOD_US 1000000ULL
 #define UART_BLOCK_TICKS 2000
 
-#define NUM_CLOCKDIFF_EVALUATIONS   5
+#define NUM_DRIFT_EVALUATIONS   5
 
 /* Configure parameters of an UART driver, communication pins and install the driver */
 const uart_config_t uart_config = {
@@ -68,11 +68,14 @@ void TIMER_Task(void *parameter)
     esp_timer_handle_t periodic_timer;
     ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &periodic_timer));
 
-    uint64_t last_gps_connection = 0;
+    uint64_t last_gps_connection_us = 0;
+
     // timestamp in microseconds when minute wraparound happened..
-    int64_t minute_wraparound_ISR = 0; // .. in interrupt
-    int64_t minute_wraparound_GPS = 0; // .. from GPS
+    uint64_t minute_wraparound_ISR = 0; // .. in interrupt
+    uint64_t minute_wraparound_GPS = 0; // .. from GPS
     time_t gps_utc = 0, isr_utc = 0;
+
+    int64_t drift_per_min[NUM_DRIFT_EVALUATIONS];
 
     while(1)
     {
@@ -88,44 +91,19 @@ void TIMER_Task(void *parameter)
                 ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US));
             }
 
-            last_gps_connection = msg.us_timestamp;
+            last_gps_connection_us = msg.us_timestamp;
             ram_mirror.last_connected_utc = msg.utc_time;
+
+            // check if time is actually different, in case more than one message comes per second
             if (msg.utc_time % 60 == 0 && gps_utc != msg.utc_time )
             {
                 minute_wraparound_GPS = msg.us_timestamp;
             }
             gps_utc = msg.utc_time;
-        }
-        else if (msg.cmd == TASK_CMD_SECOND_TICK)
-        {
-            if (last_gps_connection)
-            {
-                ram_shared.gps_time_age = USEC_TO_S(esp_timer_get_time() - last_gps_connection);
-            }
 
-            if (msg.utc_time % 60 == 0 && isr_utc != msg.utc_time)
-            {
-                minute_wraparound_ISR = msg.us_timestamp;
-            }
-            isr_utc = msg.utc_time;
-        }
-        else
-        {
-            PRINT_LOG("Unknown command: %u", msg.cmd);
-            continue;
-        }
+            if (isr_utc == 0) // check if ISR already came
+                continue; // wait until first message arrived
 
-        // check if both have been set
-        if (minute_wraparound_ISR != 0 && minute_wraparound_GPS != 0)
-        {
-            ram_shared.phase_difference_us = minute_wraparound_ISR - minute_wraparound_GPS;
-            PRINT_LOG("Phase difference (local clock - GPS clock): %lldms", USEC_TO_MS(ram_shared.phase_difference_us));
-            minute_wraparound_ISR = 0;
-            minute_wraparound_GPS = 0;
-        }
-
-        if (isr_utc != 0 && gps_utc != 0)
-        {
             // determine time difference between local clock and received time
             int32_t clock_diff_utc_sec = difftime(isr_utc, gps_utc);
     
@@ -152,10 +130,63 @@ void TIMER_Task(void *parameter)
                 }
             }
         }
+        else if (msg.cmd == TASK_CMD_SECOND_TICK)
+        {
+            if (last_gps_connection_us)
+            {
+                ram_shared.gps_time_age = USEC_TO_S(esp_timer_get_time() - last_gps_connection_us);
+            }
+
+            if (msg.utc_time % 60 == 0 && isr_utc != msg.utc_time)
+            {
+                minute_wraparound_ISR = msg.us_timestamp;
+            }
+            isr_utc = msg.utc_time;
+        }
+        else
+        {
+            PRINT_LOG("Unknown command: %u", msg.cmd);
+            continue;
+        }
+
+        // check if both have been set
+        if (minute_wraparound_ISR != 0 && minute_wraparound_GPS != 0)
+        {
+            // determine difference
+            ram_shared.drift_total_us = minute_wraparound_ISR - minute_wraparound_GPS;
+
+            // check if difference is plausible, everything greater than the max allowed drift does not make sense
+            int64_t diff_sec = ram_shared.drift_total_us;
+            if (diff_sec < 0) // make abs value
+            {
+                diff_sec = -diff_sec;
+            }
+            diff_sec = USEC_TO_S(diff_sec);
+            if (diff_sec > MAX_ALLOWED_LOCAL_CLOCK_DRIFT_SECONDS)
+            {
+                ram_shared.num_drift_evals = 0;
+                PRINT_LOG("Drift = %lld seconds: not plausible, resetting evaluation. Minute wraparound timestamp: local @ %lld gps @ %lld.",
+                    diff_sec,
+                    minute_wraparound_ISR,
+                    minute_wraparound_GPS);
+            }
+            else
+            {
+                ram_shared.num_drift_evals++;
+                PRINT_LOG("Drift (local clock - GPS clock) %lldms, evaluated for %lumin, drift %lldus/min",
+                    USEC_TO_MS(ram_shared.drift_total_us),
+                    ram_shared.num_drift_evals,
+                    ram_shared.drift_total_us / ram_shared.num_drift_evals
+                );
+            }
+            minute_wraparound_ISR = 0;
+            minute_wraparound_GPS = 0;
+        }
+
 
         if (msg.cmd == TASK_CMD_SECOND_TICK) // forward tick to timekeep
         {
-            msg_timekeep.utc_time = isr_utc;
+            msg_timekeep.utc_time = mcu_utc;
             sendTaskMessage(&msg_timekeep);
         }
     }

@@ -41,7 +41,7 @@ enum
     STATUS_TOTAL_UPTIME,
     STATUS_CURRENT_UPTIME,
     STATUS_SLAVE_CLOCK,
-    STATUS_PHASE_DIFFERENCE,
+    STATUS_DRIFT_TOTAL,
     STATUS_LAST_CONNECTED,
     NUM_STATUS_IDX
 };
@@ -216,15 +216,15 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
             LCD_I2C_printf("Slave Clk  %02u:%02u", hours, minutes);
             break;
         }
-        case STATUS_PHASE_DIFFERENCE:
+        case STATUS_DRIFT_TOTAL:
         {
-            LCD_I2C_printf("Phase   %+6dms", USEC_TO_MS(ram_shared.phase_difference_us));
+            LCD_I2C_printf(SUM_ICO_STR" drift %+6dms", USEC_TO_MS(ram_shared.drift_total_us));
             break;
         }
         case STATUS_LAST_CONNECTED:
         {
-            LCD_I2C_printf(DISH_ICO_STR WAVE_ICO_STR " %8lds ago",
-                (int32_t)ram_shared.gps_time_age
+            LCD_I2C_printf(DISH_ICO_STR WAVE_ICO_STR " %8lus ago",
+                (uint32_t)ram_shared.gps_time_age
             );
             break;
         }

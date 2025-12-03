@@ -140,9 +140,10 @@ typedef struct
 // global shared RAM data, which is not persisted
 typedef struct
 {
-  time_t gps_time_age;
+  int64_t drift_total_us;
+  uint64_t gps_time_age;
   uint32_t operating_seconds; // seconds since last boot
-  int64_t phase_difference_us;
+  uint32_t num_drift_evals;
 } ram_shared_t;
 
 //---------------------------------------------------------------------------
