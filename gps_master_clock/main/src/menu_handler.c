@@ -146,7 +146,7 @@ static void slave_advance_fn(val_union_t val)
     // Send the message with desired slave advance minutes to task
     task_msg_t msg = {
         .cmd = TASK_CMD_SLAVE_ADVANCE_MINUTES,
-        .dst = TASK_TIMEKEEP,
+        .dst = TASK_SLAVE_CLK,
         .slave_advance_minutes = val.u32
     };
     sendTaskMessage(&msg);

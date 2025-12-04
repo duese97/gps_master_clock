@@ -2,7 +2,7 @@
 #include "LCM1602.h"
 
 #include "custom_main.h"
-#include "timekeep.h" // to take timezone mutex
+#include "slave_clk.h" // to take timezone mutex
 #include "menu_handler.h"
 #include "bsp.h"
 
@@ -218,14 +218,21 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
         }
         case STATUS_DRIFT_TOTAL:
         {
-            LCD_I2C_printf(SUM_ICO_STR" drift %+6dms", USEC_TO_MS(ram_shared.drift_total_us));
+            if (ram_shared.drift_total_us == INT64_MAX)
+            {
+                LCD_I2C_printf(SUM_ICO_STR" drift  ?????ms");
+            }
+            else
+            {
+                int msec = USEC_TO_MS(ram_shared.drift_total_us);
+                LCD_I2C_printf(SUM_ICO_STR" drift  %+5dms", msec);
+            }
             break;
         }
         case STATUS_LAST_CONNECTED:
         {
-            LCD_I2C_printf(DISH_ICO_STR WAVE_ICO_STR " %8lus ago",
-                (uint32_t)ram_shared.gps_time_age
-            );
+            LCD_I2C_printf(DISH_ICO_STR WAVE_ICO_STR " %8lds ago",
+                (int32_t)(USEC_TO_S(ram_shared.gps_last_connected_us)));
             break;
         }
         default:
@@ -521,7 +528,7 @@ void LCD_Task(void *parameter)
                 // if state changed, notify time keeping task
                 if (comm_changed)
                 {
-                    msg.dst = TASK_TIMEKEEP;
+                    msg.dst = TASK_SLAVE_CLK;
                     msg.cmd = TASK_CMD_COMMISSIONING;
                     msg.commissioning = is_commissioning;
                     sendTaskMessage(&msg);

@@ -3,7 +3,7 @@
 #include "TinyGPS_wrapper.h"
 
 extern "C" {
-    #include "timekeep.h" // for TZ mutex
+    #include "slave_clk.h" // for TZ mutex
 }
 
 TinyGPS gps;

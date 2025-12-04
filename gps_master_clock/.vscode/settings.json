@@ -35,7 +35,7 @@
     "neo6m.h": "c",
     "task.h": "c",
     "bsp.h": "c",
-    "timekeep.h": "c",
+    "slave_clk.h": "c",
     "string.h": "c",
     "complex": "c",
     "esp_timer.h": "c",

@@ -49,7 +49,7 @@
 typedef enum
 {
   TASK_LCD,
-  TASK_TIMEKEEP,
+  TASK_SLAVE_CLK,
   TASK_TIMER,
 } task_type_t;
 
@@ -104,7 +104,7 @@ typedef struct
     struct
     {
       time_t utc_time;
-      uint64_t us_timestamp;
+      int64_t us_timestamp;
     };
     GPS_LOCK_STATE_t lock_state;
     struct tm local_time;
@@ -141,7 +141,7 @@ typedef struct
 typedef struct
 {
   int64_t drift_total_us;
-  uint64_t gps_time_age;
+  int64_t gps_last_connected_us;
   uint32_t operating_seconds; // seconds since last boot
   uint32_t num_drift_evals;
 } ram_shared_t;
@@ -187,10 +187,10 @@ esp_err_t store_ram_mirror(void);
     xSemaphoreGive(xUartSemaphore);                                                         \
   } while (0)
 
-#define SEC_TO_US(sec)    (sec * 1000ULL * 1000ULL)
+#define SEC_TO_US(sec)    (sec * 1000000LL)
 #define SEC_TO_MS(sec)    (sec * 1000)
 #define USEC_TO_MS(usec)  (usec / 1000)
-#define USEC_TO_S(usec)   (usec / 1000ULL / 1000ULL)
+#define USEC_TO_S(usec)   (usec / 1000000LL)
 #define SEC_TO_H(sec)     (sec / 3600)
 #define SEC_TO_DAY(sec)   (sec / 3600 / 24)
 

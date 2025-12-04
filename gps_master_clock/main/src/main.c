@@ -17,7 +17,7 @@
 
 // to get the task handles
 #include "neo6m.h"
-#include "timekeep.h"
+#include "slave_clk.h"
 #include "LCD.h"
 
 #define MIN_PWR_BAD_CNT     100     // number of times power bad has to be observed for shutdown
@@ -62,7 +62,7 @@
 
 // static stack sizes (printf related stuff needs a lot of RAM)
 #define STACKSIZE_NEO6M     4096
-#define STACKSIZE_TIMEKEEP  2028
+#define STACKSIZE_SLAVE_CLK  2028
 #define STACKSIZE_LCD       4096
 #define STACKSIZE_PWR       2028
 #define STACKSIZE_TIMER     2048
@@ -82,7 +82,7 @@ enum
 {
     // priorities (higher number = higher prio)
     TASK_PRIO_LCD = 1,
-    TASK_PRIO_TIMEKEEP,
+    TASK_PRIO_SLAVE_CLK,
     TASK_PRIO_TIMER,
     TASK_PRIO_NEO6M,
     TASK_PRIO_PWR,
@@ -90,7 +90,7 @@ enum
 
 // task stacks, task handles (for inter task communication) and messaging
 SETUP_TASK_VARS(LCD, STACKSIZE_LCD, QUEUE_STORAGE_GENERAL)
-SETUP_TASK_VARS(TIMEKEEP, STACKSIZE_TIMEKEEP, QUEUE_STORAGE_GENERAL)
+SETUP_TASK_VARS(SLAVE_CLK, STACKSIZE_SLAVE_CLK, QUEUE_STORAGE_GENERAL)
 SETUP_TASK_VARS(TIMER, STACKSIZE_TIMER, QUEUE_STORAGE_GENERAL)
 SETUP_TASK_VARS_NO_QUEUE(NEO6M, STACKSIZE_NEO6M)
 SETUP_TASK_VARS_NO_QUEUE(PWR, STACKSIZE_PWR)
@@ -99,7 +99,7 @@ SETUP_TASK_VARS_NO_QUEUE(PWR, STACKSIZE_PWR)
 static const QueueHandle_t *handleLookup[] =
 {
         [TASK_LCD]      = &queueHandleLCD,
-        [TASK_TIMEKEEP] = &queueHandleTIMEKEEP,
+        [TASK_SLAVE_CLK] = &queueHandleSLAVE_CLK,
         [TASK_TIMER]    = &queueHandleTIMER,
 };
 
@@ -292,7 +292,7 @@ static void wait_shutdown(void)
     const TaskHandle_t *checkHandles[] =
     {
         &taskHandleLCD,
-        &taskHandleTIMEKEEP,
+        &taskHandleSLAVE_CLK,
     };
     uint8_t num_handles =sizeof(checkHandles) / sizeof(checkHandles[0]);
 
@@ -445,7 +445,7 @@ void handle_power_bad(void)
                     PRINT_LOG("Power bad, shutting down tasks");
                     
                     // Tasks which are a bit more delicate, let them finish what they are doing right now
-                    task_msg_t msg = {.cmd = TASK_CMD_SHUTDOWN, .dst = TASK_TIMEKEEP };
+                    task_msg_t msg = {.cmd = TASK_CMD_SHUTDOWN, .dst = TASK_SLAVE_CLK };
                     sendTaskMessage(&msg);
                     msg.dst = TASK_LCD;
                     sendTaskMessage(&msg);
@@ -472,7 +472,7 @@ void handle_power_bad(void)
 
                     // resume all tasks
                     vTaskResume(taskHandleLCD);
-                    vTaskResume(taskHandleTIMEKEEP);
+                    vTaskResume(taskHandleSLAVE_CLK);
                     break;
                 }
             }
@@ -549,7 +549,7 @@ static void await_and_handle_testcodes(void)
             {
                 // prepare message
                 task_msg_t msg = {
-                    .dst = TASK_TIMEKEEP,
+                    .dst = TASK_SLAVE_CLK,
                     .cmd = TASK_CMD_SIMULATE_SECOND_TICK,
                     .utc_time = ram_mirror.last_connected_utc + 3600
                 };
@@ -558,7 +558,7 @@ static void await_and_handle_testcodes(void)
             else if (cmd_num == TESTCODE_DEC_HOUR)
             {
                 // prepare message
-                task_msg_t msg = { .dst = TASK_TIMEKEEP,
+                task_msg_t msg = { .dst = TASK_SLAVE_CLK,
                     .cmd = TASK_CMD_SIMULATE_SECOND_TICK,
                     .utc_time = ram_mirror.last_connected_utc - 3600
                 };
@@ -605,12 +605,12 @@ void app_main(void)
         PRINT_LOG("Error (%s) while handling NVS!", esp_err_to_name(err));
     }
 
-    SETUP_QUEUE(TIMEKEEP, QUEUE_LEN_GENERAL);
+    SETUP_QUEUE(SLAVE_CLK, QUEUE_LEN_GENERAL);
     SETUP_QUEUE(TIMER, QUEUE_LEN_GENERAL);
     SETUP_QUEUE(LCD, QUEUE_LEN_GENERAL);
 
     taskHandleNEO6M     = CREATE_TASK_STATIC(NEO6M);
-    taskHandleTIMEKEEP  = CREATE_TASK_STATIC(TIMEKEEP);
+    taskHandleSLAVE_CLK  = CREATE_TASK_STATIC(SLAVE_CLK);
     taskHandleTIMER     = CREATE_TASK_STATIC(TIMER);
     taskHandleLCD       = CREATE_TASK_STATIC(LCD);
     taskHandlePWR       = CREATE_TASK_STATIC(PWR);

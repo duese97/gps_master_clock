@@ -1,12 +1,12 @@
-#ifndef _TIMEKEEP_H_
-#define _TIMEKEEP_H_
+#ifndef _SLAVE_CLK_H_
+#define _SLAVE_CLK_H_
 
 #include <time.h> // for tm struct
 #include <stdbool.h>
 
 // exported vars
-void TIMEKEEP_Task(void *parameter);
+void SLAVE_CLK_Task(void *parameter);
 void take_tz_mutex(void);
 void give_tz_mutex(void);
 
-#endif // _TIMEKEEP_H_
+#endif // _SLAVE_CLK_H_

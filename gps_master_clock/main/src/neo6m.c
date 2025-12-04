@@ -11,7 +11,7 @@
 #include "driver/gptimer.h"
 #include "bsp.h"
 
-#include "timekeep.h"
+#include "slave_clk.h"
 #include "TinyGPS_wrapper.h"
 
 
@@ -61,18 +61,18 @@ static const esp_timer_create_args_t periodic_timer_args =
 
 void TIMER_Task(void *parameter)
 {
-    task_msg_t msg_timekeep = {.dst = TASK_TIMEKEEP, .cmd = TASK_CMD_SECOND_TICK }; // prepare message for timekeep
+    task_msg_t msg_slave_clk = {.dst = TASK_SLAVE_CLK, .cmd = TASK_CMD_SECOND_TICK }; // prepare message for slave_clk
 
     task_msg_t msg;
-    // setup periodic timer for local timekeeping
+    // setup periodic timer for local slave_clking
     esp_timer_handle_t periodic_timer;
     ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &periodic_timer));
 
-    uint64_t last_gps_connection_us = 0;
+    int64_t last_gps_connection_us = 0;
 
     // timestamp in microseconds when minute wraparound happened..
-    uint64_t minute_wraparound_ISR = 0; // .. in interrupt
-    uint64_t minute_wraparound_GPS = 0; // .. from GPS
+    int64_t minute_wraparound_ISR = 0; // .. in interrupt
+    int64_t minute_wraparound_GPS = 0; // .. from GPS
     time_t gps_utc = 0, isr_utc = 0;
 
     int64_t drift_per_min[NUM_DRIFT_EVALUATIONS];
@@ -134,7 +134,7 @@ void TIMER_Task(void *parameter)
         {
             if (last_gps_connection_us)
             {
-                ram_shared.gps_time_age = USEC_TO_S(esp_timer_get_time() - last_gps_connection_us);
+                ram_shared.gps_last_connected_us = esp_timer_get_time() - last_gps_connection_us;
             }
 
             if (msg.utc_time % 60 == 0 && isr_utc != msg.utc_time)
@@ -164,6 +164,7 @@ void TIMER_Task(void *parameter)
             diff_sec = USEC_TO_S(diff_sec);
             if (diff_sec > MAX_ALLOWED_LOCAL_CLOCK_DRIFT_SECONDS)
             {
+                ram_shared.drift_total_us = INT64_MAX; // mark invalid
                 ram_shared.num_drift_evals = 0;
                 PRINT_LOG("Drift = %lld seconds: not plausible, resetting evaluation. Minute wraparound timestamp: local @ %lld gps @ %lld.",
                     diff_sec,
@@ -184,10 +185,10 @@ void TIMER_Task(void *parameter)
         }
 
 
-        if (msg.cmd == TASK_CMD_SECOND_TICK) // forward tick to timekeep
+        if (msg.cmd == TASK_CMD_SECOND_TICK) // forward tick to slave_clk
         {
-            msg_timekeep.utc_time = mcu_utc;
-            sendTaskMessage(&msg_timekeep);
+            msg_slave_clk.utc_time = mcu_utc;
+            sendTaskMessage(&msg_slave_clk);
         }
     }
 }
