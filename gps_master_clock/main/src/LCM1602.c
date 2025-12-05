@@ -13,6 +13,11 @@
 
 #include "custom_main.h"
 
+// determine how long a single execution of i2c_write takes.
+// in some cases there is no need to delay microseconds, since the transaction already took longer
+// 1 start + 7 bit addr + 1 bit R/W + 1 ACK + 8 data bits + 1 ACK + 1 stop = 20 clock cycles
+#define I2C_TX_DURATION_US (1000*1000*20 / I2C_FREQ_HZ)
+#define US_DELAY_CHECK(us) if (us > I2C_TX_DURATION_US) ets_delay_us(us)
 
 static uint32_t max_wait_ticks = MAX_WAIT_TICKS; // amount of ticks to wait for blocking read/write
 const i2c_master_bus_config_t bus_conf =
@@ -68,11 +73,11 @@ static esp_err_t writeNibble(uint8_t value, uint8_t mode)
     err = i2c_write(data | PIN_EN);
     if (err == ESP_OK)
     {
-       ets_delay_us(1);
+       US_DELAY_CHECK(1);
    
        // Enable = LOW
        err = i2c_write(data & ~PIN_EN);
-       ets_delay_us(50);
+       US_DELAY_CHECK(50);
     }
     return err;
 }
@@ -151,23 +156,23 @@ esp_err_t LCD_I2C_begin(uint8_t cols, uint8_t lines)
 		// we start in 8bit mode, try to set 4 bit mode
 		// Special case of "Function Set"
 		send(0x03, FOUR_BITS);
-		ets_delay_us(4500); // wait min 4.1ms
+		US_DELAY_CHECK(4500); // wait min 4.1ms
 
 		// second try
 		send(0x03, FOUR_BITS);
-		ets_delay_us(150); // wait min 100us
+		US_DELAY_CHECK(150); // wait min 100us
 
 		// third go!
 		send(0x03, FOUR_BITS);
-		ets_delay_us(150); // wait min of 100us
+		US_DELAY_CHECK(150); // wait min of 100us
 
 		// finally, set to 4-bit interface
 		send(0x02, FOUR_BITS);
-		ets_delay_us(150); // wait min of 100us
+		US_DELAY_CHECK(150); // wait min of 100us
 
 		// finally, set # lines, font size, etc.
 		command(LCD_FUNCTIONSET | _displayfunction);
-		ets_delay_us(60); // wait more
+		US_DELAY_CHECK(60); // wait more
 
 		// turn the display on with no cursor or blinking default
 		_displaycontrol = LCD_DISPLAYON | LCD_CURSOROFF | LCD_BLINKOFF;
@@ -228,13 +233,13 @@ esp_err_t LCD_I2C_printf(const char *fmt, ...)
 void LCD_I2C_clear()
 {
    command(LCD_CLEARDISPLAY);     // clear display, set cursor position to zero
-   ets_delay_us(HOME_CLEAR_EXEC); // this command is time consuming
+   US_DELAY_CHECK(HOME_CLEAR_EXEC); // this command is time consuming
 }
 
 void LCD_I2C_home()
 {
    command(LCD_RETURNHOME);       // set cursor position to zero
-   ets_delay_us(HOME_CLEAR_EXEC); // This command is time consuming
+   US_DELAY_CHECK(HOME_CLEAR_EXEC); // This command is time consuming
 }
 
 void LCD_I2C_setCursor(uint8_t col, uint8_t row)
@@ -354,12 +359,12 @@ void LCD_I2C_createChar(uint8_t location, const uint8_t charmap[])
    location &= 0x7; // we only have 8 locations 0-7
 
    command(LCD_SETCGRAMADDR | (location << 3));
-   ets_delay_us(30);
+   US_DELAY_CHECK(30);
 
    for (uint8_t i = 0; i < 8; i++)
    {
       write(charmap[i]); // call the virtual write method
-      ets_delay_us(40);
+      US_DELAY_CHECK(40);
    }
 }
 
