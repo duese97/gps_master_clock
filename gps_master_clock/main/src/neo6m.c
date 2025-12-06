@@ -18,7 +18,8 @@
 #define SECOND_TIMER_PERIOD_US 1000000ULL
 #define UART_BLOCK_TICKS 2000
 
-#define NUM_DRIFT_EVALUATIONS   5
+#define NUM_DRIFT_EVALUATIONS   7
+
 
 /* Configure parameters of an UART driver, communication pins and install the driver */
 const uart_config_t uart_config = {
@@ -59,6 +60,44 @@ static const esp_timer_create_args_t periodic_timer_args =
     .name = "secTimer"
 };
 
+static void calc_linear_regression(int64_t* src_arr, int src_len, float* slope, float* y_intercept)
+{
+    float x_average = (src_len - 1) / 2; // assumes equally spaced x values
+    float y_average = 0;
+
+    for (int idx = 0; idx < src_len; idx++)
+    {
+        y_average += src_arr[idx];
+    }
+    y_average /= src_len;
+
+    float std_deviation_x = 0;
+    float std_deviation_y = 0;
+    for (int idx = 0; idx < src_len; idx++)
+    {
+        float x_square = (idx - x_average); x_square *= x_square;
+        std_deviation_x += x_square;
+
+        float y_square = (src_arr[idx] - y_average); y_square *= y_square;
+        std_deviation_y += y_square;
+    }
+    // why (src_len - 1) -> we take it from a sample and not a population (just scr_len)
+    std_deviation_x = sqrt(std_deviation_x / (src_len - 1));
+    std_deviation_y = sqrt(std_deviation_y / (src_len - 1));
+
+    float covariance_xy = 0;
+    for (int idx = 0; idx < src_len; idx++)
+    {
+        covariance_xy += ((idx - x_average) * (src_arr[idx] - y_average));
+    }
+    covariance_xy *= (1.0 / (src_len - 1));
+
+    float correlation_xy = covariance_xy / (std_deviation_x * std_deviation_y);
+
+    *slope = correlation_xy * std_deviation_x / std_deviation_y;
+    *y_intercept = -1.0f * (*slope) * x_average + y_average;
+}
+
 void TIMER_Task(void *parameter)
 {
     task_msg_t msg_slave_clk = {.dst = TASK_SLAVE_CLK, .cmd = TASK_CMD_SECOND_TICK }; // prepare message for slave_clk
@@ -75,6 +114,9 @@ void TIMER_Task(void *parameter)
     int64_t minute_wraparound_GPS = 0; // .. from GPS
     time_t gps_utc = 0, isr_utc = 0;
 
+    uint64_t corrected_period_us = 0;
+
+    int num_drift_evals = 0;
     int64_t drift_per_min[NUM_DRIFT_EVALUATIONS];
 
     while(1)
@@ -109,7 +151,7 @@ void TIMER_Task(void *parameter)
     
             // Reason to adjust the timer: the UTC time is simply wrong (transmission error, etc.)
             // or the local timer leads/lags too much
-            bool adjust_utc_diff = abs(clock_diff_utc_sec) >= MAX_ALLOWED_LOCAL_CLOCK_DRIFT_SECONDS;
+            bool adjust_utc_diff = abs(clock_diff_utc_sec) >= MAX_ALLOWED_ABS_DIFF_SECONDS;
             if (adjust_utc_diff)
             { // too great, adjust
                 ESP_ERROR_CHECK(esp_timer_stop(periodic_timer)); // halt timer, it does read-modify-write of the variable (not atomic)!
@@ -137,6 +179,20 @@ void TIMER_Task(void *parameter)
                 ram_shared.gps_last_connected_us = esp_timer_get_time() - last_gps_connection_us;
             }
 
+            if (corrected_period_us != 0)
+            {
+                if (esp_timer_is_active(periodic_timer))
+                { // sanity check: In case of weird race conditions make sure to stop the timer beforehand
+                    ESP_ERROR_CHECK(esp_timer_stop(periodic_timer));
+                } // else: No need to stop the timer, was a one shot one
+
+                // now use the period as previously determined
+                ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, corrected_period_us));
+
+                PRINT_LOG("Compensation done, using new period of %llu", corrected_period_us);
+                corrected_period_us = 0; // finalize the correction
+            }
+
             if (msg.utc_time % 60 == 0 && isr_utc != msg.utc_time)
             {
                 minute_wraparound_ISR = msg.us_timestamp;
@@ -152,33 +208,61 @@ void TIMER_Task(void *parameter)
         // check if both have been set
         if (minute_wraparound_ISR != 0 && minute_wraparound_GPS != 0)
         {
+            bool perform_correction = true;
+
             // determine difference
             ram_shared.drift_total_us = minute_wraparound_ISR - minute_wraparound_GPS;
 
-            // check if difference is plausible, everything greater than the max allowed drift does not make sense
-            int64_t diff_sec = ram_shared.drift_total_us;
-            if (diff_sec < 0) // make abs value
+            // First, check if difference is plausible. Everything greater than the max allowed drift does not make sense
+            if (llabs(ram_shared.drift_total_us) > MAX_PLAUSIBLE_DRIFT)
             {
-                diff_sec = -diff_sec;
-            }
-            diff_sec = USEC_TO_S(diff_sec);
-            if (diff_sec > MAX_ALLOWED_LOCAL_CLOCK_DRIFT_SECONDS)
-            {
-                ram_shared.drift_total_us = INT64_MAX; // mark invalid
-                ram_shared.num_drift_evals = 0;
+                perform_correction = false;
                 PRINT_LOG("Drift = %lld seconds: not plausible, resetting evaluation. Minute wraparound timestamp: local @ %lld gps @ %lld.",
-                    diff_sec,
+                    ram_shared.drift_total_us,
                     minute_wraparound_ISR,
                     minute_wraparound_GPS);
+
+                num_drift_evals = 0;
             }
-            else
+
+            if (perform_correction)
             {
-                ram_shared.num_drift_evals++;
-                PRINT_LOG("Drift (local clock - GPS clock) %lldms, evaluated for %lumin, drift %lldus/min",
-                    USEC_TO_MS(ram_shared.drift_total_us),
-                    ram_shared.num_drift_evals,
-                    ram_shared.drift_total_us / ram_shared.num_drift_evals
-                );
+                PRINT_LOG("Current total deviation: %lldus", ram_shared.drift_total_us);
+
+                drift_per_min[num_drift_evals] = ram_shared.drift_total_us;
+                num_drift_evals++;
+
+                // check if we are done
+                perform_correction = (num_drift_evals >= NUM_DRIFT_EVALUATIONS);
+            }
+
+            float us_drift_per_min = 0, total_drift_us = 0;
+            if (perform_correction)
+            {
+                num_drift_evals = 0; // reset counter in any case
+                calc_linear_regression(drift_per_min, NUM_DRIFT_EVALUATIONS, &us_drift_per_min, &total_drift_us);
+
+                PRINT_LOG("Drift %fus/min(%fms/h), total: %fus",
+                    us_drift_per_min, us_drift_per_min * 60.0 * 24.0 / 1000.0, total_drift_us);
+
+                // too small drifts do not need to be corrected
+                if (fabs(total_drift_us) < DRIFT_CORR_THRESHOLD_US)
+                {
+                    PRINT_LOG("Drift too small, local clock accurate enough (for now)");
+                    perform_correction = false;
+                }
+            }
+
+            if (perform_correction)
+            {
+                uint64_t align_time_us = SECOND_TIMER_PERIOD_US - total_drift_us;
+                corrected_period_us = (us_drift_per_min / 60.0) * SECOND_TIMER_PERIOD_US + SECOND_TIMER_PERIOD_US;
+
+                // first stop the timer
+                ESP_ERROR_CHECK(esp_timer_stop(periodic_timer));
+                // align again with GPS clock, compensate the total drift once by modifying the period
+                ESP_ERROR_CHECK(esp_timer_start_once(periodic_timer, align_time_us));
+                PRINT_LOG("Threshold surpassed, starting drift correction in %lldus", align_time_us);
             }
             minute_wraparound_ISR = 0;
             minute_wraparound_GPS = 0;
