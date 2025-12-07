@@ -18,7 +18,13 @@
 #define SECOND_TIMER_PERIOD_US 1000000ULL
 #define UART_BLOCK_TICKS 2000
 
-#define NUM_DRIFT_EVALUATIONS   3
+
+enum
+{
+    CLK_CORRECT_NONE,
+    CLK_CORRECT_PHASE,
+    CLK_CORRECT_DRIFT
+};
 
 
 /* Configure parameters of an UART driver, communication pins and install the driver */
@@ -40,7 +46,6 @@ const int intr_alloc_flags =
 
 
 static volatile time_t mcu_utc; // current, locally tracked UTC time of the micro controller
-
 
 static void periodic_timer_callback(void* arg)
 {
@@ -115,9 +120,12 @@ void TIMER_Task(void *parameter)
     time_t gps_utc = 0, isr_utc = 0;
 
     int64_t delta_period_us = 0;
+    uint64_t align_time_us = 0;
 
     int num_drift_evals = 0;
     int64_t drift_per_min[NUM_DRIFT_EVALUATIONS];
+
+    int clk_correct_state = CLK_CORRECT_NONE;
 
     while(1)
     {
@@ -129,19 +137,7 @@ void TIMER_Task(void *parameter)
             if (esp_timer_is_active(periodic_timer) == false)
             { // inital startup
                 mcu_utc = msg.utc_time;
-                // start cyclic timer
                 ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US));
-            }
-            else if (delta_period_us != 0)
-            {
-                // stop running timer, align it with GPS signal
-                ESP_ERROR_CHECK(esp_timer_stop(periodic_timer));
-
-                // now use the period as previously determined
-                ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US + delta_period_us));
-
-                PRINT_LOG("Compensation done");
-                delta_period_us = 0; // finalize the correction
             }
 
             last_gps_connection_us = msg.us_timestamp;
@@ -153,6 +149,9 @@ void TIMER_Task(void *parameter)
                 minute_wraparound_GPS = msg.us_timestamp;
             }
             gps_utc = msg.utc_time;
+
+            if (clk_correct_state != CLK_CORRECT_NONE) // do not go on if correcting the clock right now
+                continue;
 
             if (isr_utc == 0) // check if ISR already came
                 continue; // wait until first message arrived
@@ -188,6 +187,36 @@ void TIMER_Task(void *parameter)
             if (last_gps_connection_us)
             {
                 ram_shared.gps_last_connected_us = esp_timer_get_time() - last_gps_connection_us;
+            }
+
+            if (clk_correct_state == CLK_CORRECT_PHASE)
+            {
+                if (align_time_us != 0)
+                {
+                    // first stop the timer
+                    ESP_ERROR_CHECK(esp_timer_stop(periodic_timer));
+                    // align again with GPS clock, compensate the total drift by modifying the period
+                    ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, align_time_us));
+    
+                    align_time_us = 0;
+                    PRINT_LOG("Aligning to correct phase once...");
+                }
+                clk_correct_state = CLK_CORRECT_DRIFT;
+            }
+            else if (clk_correct_state == CLK_CORRECT_DRIFT)
+            {
+                if (delta_period_us != 0)
+                {
+                    // stop running timer, align it with GPS signal
+                    ESP_ERROR_CHECK(esp_timer_stop(periodic_timer));
+    
+                    // now use the period as previously determined
+                    ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US + delta_period_us));
+    
+                    delta_period_us = 0; // finalize the correction
+                    PRINT_LOG("Compensation done");
+                }
+                clk_correct_state = CLK_CORRECT_NONE;
             }
 
             if (msg.utc_time % 60 == 0 && isr_utc != msg.utc_time)
@@ -241,8 +270,8 @@ void TIMER_Task(void *parameter)
                 num_drift_evals = 0; // reset counter in any case
                 calc_linear_regression(drift_per_min, NUM_DRIFT_EVALUATIONS, &us_drift_per_min, &total_drift_us);
 
-                PRINT_LOG("Drift %fus/min(%fms/h), total: %fus",
-                    us_drift_per_min, us_drift_per_min * 60.0 * 24.0 / 1000.0, total_drift_us);
+                PRINT_LOG("Drift %fus/min(%fus/d), total: %fus",
+                    us_drift_per_min, us_drift_per_min * 60.0 * 24.0, total_drift_us);
 
                 // too small drifts do not need to be corrected
                 if (fabs(total_drift_us) < DRIFT_CORR_THRESHOLD_US)
@@ -254,8 +283,12 @@ void TIMER_Task(void *parameter)
 
             if (perform_correction)
             {
+                clk_correct_state = CLK_CORRECT_PHASE;
+
+                align_time_us = SECOND_TIMER_PERIOD_US - total_drift_us;
                 delta_period_us = (us_drift_per_min / 60.0) * SECOND_TIMER_PERIOD_US;
-                PRINT_LOG("Threshold surpassed, drift correction delta: %lld", delta_period_us);
+
+                PRINT_LOG("Threshold surpassed, drift correction delta: %lldus, phase: %lluus", delta_period_us, align_time_us);
             }
             else
             {
@@ -284,6 +317,7 @@ void NEO6M_Task(void *parameter)
     char buf;
     struct tm gps_local_time = {0}; 
     uint32_t age;
+    time_t last_utc = 0;
 
     GPS_LOCK_STATE_t lock_state = GPS_LOCK_UNINITIALIZED;
 
@@ -319,9 +353,16 @@ void NEO6M_Task(void *parameter)
             PRINT_LOG("Unable to crack datetime, result: %d", res);
             continue;
         }
+        
+        // only send message if the seconds actually differ
+        if (last_utc == msg_gps_time.utc_time)
+        {
+            continue;
+        }
+
+        last_utc = msg_gps_time.utc_time;
         msg_gps_time.us_timestamp = esp_timer_get_time();
         sendTaskMessage(&msg_gps_time);
-
         
         if (lock_state == GPS_LOCK_UNINITIALIZED)
         {

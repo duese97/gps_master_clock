@@ -32,8 +32,10 @@
 // timer interrupt.
 #define MAX_ALLOWED_ABS_DIFF_SECONDS 2
 
+
+#define NUM_DRIFT_EVALUATIONS   7
 #define MAX_PLAUSIBLE_DRIFT     100000
-#define DRIFT_CORR_THRESHOLD_US 1000 // minimum threshold, at which a correction will be performed
+#define DRIFT_CORR_THRESHOLD_US 10000 // minimum threshold, at which a correction will be performed
 
 #define ARRAY_LEN(x) (sizeof(x)/sizeof(x[0]))
 
