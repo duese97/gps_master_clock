@@ -18,7 +18,7 @@
 #define SECOND_TIMER_PERIOD_US 1000000ULL
 #define UART_BLOCK_TICKS 2000
 
-#define NUM_DRIFT_EVALUATIONS   7
+#define NUM_DRIFT_EVALUATIONS   3
 
 
 /* Configure parameters of an UART driver, communication pins and install the driver */
@@ -114,7 +114,7 @@ void TIMER_Task(void *parameter)
     int64_t minute_wraparound_GPS = 0; // .. from GPS
     time_t gps_utc = 0, isr_utc = 0;
 
-    uint64_t corrected_period_us = 0;
+    int64_t delta_period_us = 0;
 
     int num_drift_evals = 0;
     int64_t drift_per_min[NUM_DRIFT_EVALUATIONS];
@@ -131,6 +131,17 @@ void TIMER_Task(void *parameter)
                 mcu_utc = msg.utc_time;
                 // start cyclic timer
                 ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US));
+            }
+            else if (delta_period_us != 0)
+            {
+                // stop running timer, align it with GPS signal
+                ESP_ERROR_CHECK(esp_timer_stop(periodic_timer));
+
+                // now use the period as previously determined
+                ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US + delta_period_us));
+
+                PRINT_LOG("Compensation done");
+                delta_period_us = 0; // finalize the correction
             }
 
             last_gps_connection_us = msg.us_timestamp;
@@ -179,20 +190,6 @@ void TIMER_Task(void *parameter)
                 ram_shared.gps_last_connected_us = esp_timer_get_time() - last_gps_connection_us;
             }
 
-            if (corrected_period_us != 0)
-            {
-                if (esp_timer_is_active(periodic_timer))
-                { // sanity check: In case of weird race conditions make sure to stop the timer beforehand
-                    ESP_ERROR_CHECK(esp_timer_stop(periodic_timer));
-                } // else: No need to stop the timer, was a one shot one
-
-                // now use the period as previously determined
-                ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, corrected_period_us));
-
-                PRINT_LOG("Compensation done, using new period of %llu", corrected_period_us);
-                corrected_period_us = 0; // finalize the correction
-            }
-
             if (msg.utc_time % 60 == 0 && isr_utc != msg.utc_time)
             {
                 minute_wraparound_ISR = msg.us_timestamp;
@@ -217,7 +214,7 @@ void TIMER_Task(void *parameter)
             if (llabs(ram_shared.drift_total_us) > MAX_PLAUSIBLE_DRIFT)
             {
                 perform_correction = false;
-                PRINT_LOG("Drift = %lld seconds: not plausible, resetting evaluation. Minute wraparound timestamp: local @ %lld gps @ %lld.",
+                PRINT_LOG("Drift = %lldus: not plausible, resetting evaluation. Minute wraparound timestamp: local @ %lld gps @ %lld.",
                     ram_shared.drift_total_us,
                     minute_wraparound_ISR,
                     minute_wraparound_GPS);
@@ -227,10 +224,12 @@ void TIMER_Task(void *parameter)
 
             if (perform_correction)
             {
-                PRINT_LOG("Current total deviation: %lldus", ram_shared.drift_total_us);
-
                 drift_per_min[num_drift_evals] = ram_shared.drift_total_us;
                 num_drift_evals++;
+
+                PRINT_LOG("Current total deviation: %lldus, eval %d/%d",
+                    ram_shared.drift_total_us,
+                    num_drift_evals, NUM_DRIFT_EVALUATIONS);
 
                 // check if we are done
                 perform_correction = (num_drift_evals >= NUM_DRIFT_EVALUATIONS);
@@ -255,14 +254,12 @@ void TIMER_Task(void *parameter)
 
             if (perform_correction)
             {
-                uint64_t align_time_us = SECOND_TIMER_PERIOD_US - total_drift_us;
-                corrected_period_us = (us_drift_per_min / 60.0) * SECOND_TIMER_PERIOD_US + SECOND_TIMER_PERIOD_US;
-
-                // first stop the timer
-                ESP_ERROR_CHECK(esp_timer_stop(periodic_timer));
-                // align again with GPS clock, compensate the total drift once by modifying the period
-                ESP_ERROR_CHECK(esp_timer_start_once(periodic_timer, align_time_us));
-                PRINT_LOG("Threshold surpassed, starting drift correction in %lldus", align_time_us);
+                delta_period_us = (us_drift_per_min / 60.0) * SECOND_TIMER_PERIOD_US;
+                PRINT_LOG("Threshold surpassed, drift correction delta: %lld", delta_period_us);
+            }
+            else
+            {
+                delta_period_us = 0;
             }
             minute_wraparound_ISR = 0;
             minute_wraparound_GPS = 0;
