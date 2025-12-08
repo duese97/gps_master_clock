@@ -187,8 +187,13 @@ void TIMER_Task(void *parameter)
                     num_drift_evals = 0; // reset counter in any case
                     calc_linear_regression(drift_per_min, NUM_DRIFT_EVALUATIONS, &us_drift_per_min, &total_drift_us);
 
-                    PRINT_LOG("Drift %fus/min(%fus/d), total: %fus",
-                        us_drift_per_min, us_drift_per_min * 60.0 * 24.0, total_drift_us);
+                    float correction_factor = 1.0 - us_drift_per_min;
+                    PRINT_LOG("Raw regression values: Slope = %f Intercept = %f. Drift correction factor %f",
+                        us_drift_per_min, total_drift_us,
+                        correction_factor
+                    );
+                    ram_shared.current_period_us = correction_factor * ram_shared.current_period_us;
+                    clk_correct_state = CLK_CORRECT_PHASE;
                 }
             }
 
@@ -215,6 +220,7 @@ void TIMER_Task(void *parameter)
             { // too great, adjust
                 ESP_ERROR_CHECK(esp_timer_stop(periodic_timer)); // halt timer, it does read-modify-write of the variable (not atomic)!
                 mcu_utc = gps_utc; // set new UTC timestamp
+                isr_utc = 0;
                 minute_wraparound_ISR = 0; minute_wraparound_GPS = 0; // reset the timestamps
                 ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, ram_shared.current_period_us)); // restart timer
     
@@ -237,11 +243,11 @@ void TIMER_Task(void *parameter)
                 // Accumulate the total drifted time into separate counters
                 if (clock_diff_usec > 0)
                 {
-                    ram_mirror.total_pos_time_corrected_ms += clock_diff_usec;
+                    ram_mirror.total_pos_time_corrected_ms += USEC_TO_MS(clock_diff_usec);
                 }
                 else
                 {
-                    ram_mirror.total_neg_time_corrected_ms += -clock_diff_usec;
+                    ram_mirror.total_neg_time_corrected_ms += -USEC_TO_MS(clock_diff_usec);
                 }
             }
         }
@@ -269,7 +275,7 @@ void TIMER_Task(void *parameter)
         {
             // determine difference
             ram_shared.drift_total_us = minute_wraparound_ISR - minute_wraparound_GPS;
-
+#if 0
             // check if the difference is too much
             bool drift_corr_needed = (llabs(ram_shared.drift_total_us) < MAX_PLAUSIBLE_DRIFT);
             drift_corr_needed &= (llabs(ram_shared.drift_total_us) > DRIFT_CORR_THRESHOLD_US);
@@ -282,7 +288,7 @@ void TIMER_Task(void *parameter)
             {
                 clk_correct_state = CLK_CORRECT_NONE;
             }
-
+#endif
             minute_wraparound_ISR = 0;
             minute_wraparound_GPS = 0;
         }
