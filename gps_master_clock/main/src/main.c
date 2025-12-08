@@ -62,10 +62,10 @@
 
 // static stack sizes (printf related stuff needs a lot of RAM)
 #define STACKSIZE_NEO6M     4096
-#define STACKSIZE_SLAVE_CLK  2028
+#define STACKSIZE_SLAVE_CLK 2028
 #define STACKSIZE_LCD       4096
 #define STACKSIZE_PWR       2028
-#define STACKSIZE_TIMER     2048
+#define STACKSIZE_TIMER     4096
 
 // testing utility
 #define MAX_COMMAND_LENGTH  16

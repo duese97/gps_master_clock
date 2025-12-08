@@ -30,10 +30,10 @@
 // The amount of time that the local second timebase can drift away from the 'correct' time.
 // A bit of 'wiggle' room is left, since the correction requires starting and stopping the
 // timer interrupt.
-#define MAX_ALLOWED_ABS_DIFF_SECONDS 2
+#define MAX_ALLOWED_ABS_DIFF_USEC 2000000LL
 
 
-#define NUM_DRIFT_EVALUATIONS   7
+#define NUM_DRIFT_EVALUATIONS   5
 #define MAX_PLAUSIBLE_DRIFT     100000
 #define DRIFT_CORR_THRESHOLD_US 10000 // minimum threshold, at which a correction will be performed
 
@@ -147,6 +147,7 @@ typedef struct
 {
   int64_t drift_total_us;
   int64_t gps_last_connected_us;
+  uint64_t current_period_us;
   uint32_t operating_seconds; // seconds since last boot
 } ram_shared_t;
 
