@@ -33,9 +33,8 @@
 #define MAX_ALLOWED_ABS_DIFF_USEC 2000000LL
 
 
-#define NUM_DRIFT_EVALUATIONS   5
-#define MAX_PLAUSIBLE_DRIFT     100000
-#define DRIFT_CORR_THRESHOLD_US 10000 // minimum threshold, at which a correction will be performed
+#define NUM_DRIFT_EVALUATIONS   60*10
+#define DRIFT_CORR_THRESHOLD_US 100000 // minimum threshold, at which a correction will be performed
 
 #define ARRAY_LEN(x) (sizeof(x)/sizeof(x[0]))
 
