@@ -47,14 +47,11 @@ const int intr_alloc_flags =
 static int num_drift_evals = 0;
 static int64_t drift_per_sec[NUM_DRIFT_EVALUATIONS];
 
-static volatile time_t mcu_utc; // current, locally tracked UTC time of the micro controller
-
 static void periodic_timer_callback(void* arg)
 {
     static task_msg_t msg = {.dst = TASK_TIMER, .cmd = TASK_CMD_SECOND_TICK }; // prepare message for timer
-    
-    mcu_utc++;
-    msg.utc_time = mcu_utc;
+
+    // just remember when the tick happened, no need to keep track here of UTC timestamp
     msg.us_timestamp = esp_timer_get_time();
 
     sendTaskMessageISR(&msg);
@@ -149,7 +146,7 @@ void TIMER_Task(void *parameter)
             if (started_once == false)
             { // inital startup
                 started_once = true;
-                mcu_utc = msg.utc_time;
+                isr_utc = msg.utc_time;
                 ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, ram_shared.current_period_us));
             }
 
@@ -163,6 +160,7 @@ void TIMER_Task(void *parameter)
             else if (clk_correct_state != CLK_CORRECT_NONE)
             {
                 us_timestamp_GPS = 0;
+                isr_utc = gps_utc;
                 PRINT_LOG("Clock correction ongoing, skipping");
                 continue;
             }
@@ -200,8 +198,6 @@ void TIMER_Task(void *parameter)
                     ESP_ERROR_CHECK(esp_timer_stop(periodic_timer)); // halt timer, it does read-modify-write of the variable (not atomic)!
                 }
                 us_timestamp_ISR = 0; // reset the timestamps
-                //mcu_utc = gps_utc; // set new UTC timestamp
-                //isr_utc = gps_utc;
                 
                 if (clk_correct_state == CLK_CORRECT_PHASE)
                 {
@@ -209,7 +205,7 @@ void TIMER_Task(void *parameter)
                     int64_t tmp_drift = ram_shared.drift_total_us % temp_period;
                     if (ram_shared.drift_total_us > 0)
                     {
-                        temp_period -= tmp_drift + ram_shared.current_period_us;
+                        temp_period -= tmp_drift;
                     }
                     else
                     {
@@ -241,12 +237,12 @@ void TIMER_Task(void *parameter)
             else
             {
                 us_timestamp_ISR = msg.us_timestamp;
-                isr_utc = msg.utc_time;
+                isr_utc++;
             }
 
             PRINT_LOG("Sec tick %lld", us_timestamp_ISR); 
 
-            msg_slave_clk.utc_time = mcu_utc;
+            msg_slave_clk.utc_time = isr_utc;
             sendTaskMessage(&msg_slave_clk);
         }
         else
@@ -265,9 +261,10 @@ void TIMER_Task(void *parameter)
             if (isr_utc == gps_utc)
             {
                 ram_shared.drift_total_us = us_timestamp_ISR - us_timestamp_GPS; // determine difference
-                if (llabs(ram_shared.drift_total_us % ram_shared.current_period_us) > DRIFT_CORR_THRESHOLD_US)
+                PRINT_LOG("Current drift: %lld", ram_shared.drift_total_us);
+                if (llabs(ram_shared.drift_total_us) > DRIFT_CORR_THRESHOLD_US)
                 {
-                    PRINT_LOG("Current drift: %lld", ram_shared.drift_total_us);
+                    //PRINT_LOG("Current drift: %lld", ram_shared.drift_total_us);
                     clk_correct_state = CLK_CORRECT_PHASE; // request alignment
                 }
             }
