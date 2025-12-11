@@ -137,6 +137,7 @@ void TIMER_Task(void *parameter)
     ram_shared.current_period_us = SECOND_TIMER_PERIOD_US;
 
     int clk_correct_state = CLK_CORRECT_NONE;
+    bool started_once = false;
 
     while(1)
     {
@@ -145,60 +146,45 @@ void TIMER_Task(void *parameter)
 
         if (msg.cmd == TASK_CMD_GPS_TIME)
         {
-            if (esp_timer_is_active(periodic_timer) == false)
+            if (started_once == false)
             { // inital startup
+                started_once = true;
                 mcu_utc = msg.utc_time;
                 ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, ram_shared.current_period_us));
             }
 
-            // should not interfere while clock correcting
-            if (clk_correct_state != CLK_CORRECT_NONE)
+            // check if time is actually different, in case more than one message comes per second
+            if (gps_utc != 0 && gps_utc == msg.utc_time)
             {
                 us_timestamp_GPS = 0;
-                continue;
-            }
-
-            // check if time is actually different, in case more than one message comes per second
-            if (gps_utc != msg.utc_time)
-            {
-                drift_per_sec[num_drift_evals] = msg.us_timestamp - last_gps_connection_us; // determine difference
-                num_drift_evals++;
-                if (num_drift_evals >= NUM_DRIFT_EVALUATIONS)
-                {
-                    qsort(drift_per_sec, NUM_DRIFT_EVALUATIONS, sizeof(drift_per_sec[0]), comp);
-                    ram_shared.current_period_us = drift_per_sec[NUM_DRIFT_EVALUATIONS / 2];
-                    PRINT_LOG("Current period: %lld", ram_shared.current_period_us);
-                    num_drift_evals = 0;
-                    clk_correct_state = CLK_CORRECT_PERIOD;
-                }
-
-                us_timestamp_GPS = msg.us_timestamp;
-                last_gps_connection_us = msg.us_timestamp;
-                ram_mirror.last_connected_utc = msg.utc_time;
-                gps_utc = msg.utc_time;
-            }
-            else
-            {
                 PRINT_LOG("Ignoring message, already processed GPS time in this second");
                 continue;
             }
-            
-            // check if ISR already came AND no clock correction right now active
-            if (isr_utc != 0 && clk_correct_state == CLK_CORRECT_NONE)
+            else if (clk_correct_state != CLK_CORRECT_NONE)
             {
-              // determine time difference between local clock and received time
-              int64_t clock_diff_usec = difftime(isr_utc, gps_utc);
-              clock_diff_usec = SEC_TO_US(clock_diff_usec);
-
-              // Reason to adjust the timer: the UTC time is simply wrong (transmission error, etc.)
-              // or the local timer leads/lags too much
-              if (llabs(clock_diff_usec) >= MAX_ALLOWED_ABS_DIFF_USEC)
-              {
-                PRINT_LOG("GPS time and local time differ too much");
-                clk_correct_state = CLK_CORRECT_PHASE;
-                ram_shared.drift_total_us = clock_diff_usec;
-              }
+                us_timestamp_GPS = 0;
+                PRINT_LOG("Clock correction ongoing, skipping");
+                continue;
             }
+
+            us_timestamp_GPS = msg.us_timestamp;
+
+            PRINT_LOG("GPS tick %lld", us_timestamp_GPS);
+
+            drift_per_sec[num_drift_evals] = us_timestamp_GPS - last_gps_connection_us; // determine difference
+            num_drift_evals++;
+            if (num_drift_evals >= NUM_DRIFT_EVALUATIONS)
+            {
+                qsort(drift_per_sec, NUM_DRIFT_EVALUATIONS, sizeof(drift_per_sec[0]), comp);
+                ram_shared.current_period_us = drift_per_sec[NUM_DRIFT_EVALUATIONS / 2];
+                PRINT_LOG("Current period: %lld", ram_shared.current_period_us);
+                num_drift_evals = 0;
+                clk_correct_state = CLK_CORRECT_PERIOD;
+            }
+
+            last_gps_connection_us = msg.us_timestamp;
+            ram_mirror.last_connected_utc = msg.utc_time;
+            gps_utc = msg.utc_time;
         }
         else if (msg.cmd == TASK_CMD_SECOND_TICK)
         {
@@ -206,30 +192,31 @@ void TIMER_Task(void *parameter)
             {
                 ram_shared.gps_last_connected_us = esp_timer_get_time() - last_gps_connection_us;
             }
-
             // Check if any correction is needed. Do it when the timer fired, to avoid "glitches".
             if (clk_correct_state != CLK_CORRECT_NONE)
             {
-                ESP_ERROR_CHECK(esp_timer_stop(periodic_timer)); // halt timer, it does read-modify-write of the variable (not atomic)!
-                us_timestamp_GPS = 0; us_timestamp_ISR = 0; // reset the timestamps
-                mcu_utc = gps_utc; // set new UTC timestamp
-                isr_utc = gps_utc;
+                if (esp_timer_is_active(periodic_timer))
+                {
+                    ESP_ERROR_CHECK(esp_timer_stop(periodic_timer)); // halt timer, it does read-modify-write of the variable (not atomic)!
+                }
+                us_timestamp_ISR = 0; // reset the timestamps
+                //mcu_utc = gps_utc; // set new UTC timestamp
+                //isr_utc = gps_utc;
                 
                 if (clk_correct_state == CLK_CORRECT_PHASE)
                 {
                     uint64_t temp_period = ram_shared.current_period_us;
-                    // first make sure the drift is within our period
                     int64_t tmp_drift = ram_shared.drift_total_us % temp_period;
                     if (ram_shared.drift_total_us > 0)
                     {
-                        temp_period -= tmp_drift;
+                        temp_period -= tmp_drift + ram_shared.current_period_us;
                     }
                     else
                     {
                         temp_period += tmp_drift;
                     }
 
-                    ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, temp_period)); // restart timer
+                    ESP_ERROR_CHECK(esp_timer_start_once(periodic_timer, temp_period)); // restart timer
                     clk_correct_state = CLK_CORRECT_PERIOD;
                     PRINT_LOG("Aligning local clock to GPS by %lldus, period %lluus",
                         ram_shared.drift_total_us, temp_period);
@@ -243,7 +230,6 @@ void TIMER_Task(void *parameter)
                     {
                         ram_mirror.total_neg_time_corrected_ms += -USEC_TO_MS(ram_shared.drift_total_us);
                     }
-
                 }
                 else if (clk_correct_state == CLK_CORRECT_PERIOD)
                 {
@@ -257,6 +243,11 @@ void TIMER_Task(void *parameter)
                 us_timestamp_ISR = msg.us_timestamp;
                 isr_utc = msg.utc_time;
             }
+
+            PRINT_LOG("Sec tick %lld", us_timestamp_ISR); 
+
+            msg_slave_clk.utc_time = mcu_utc;
+            sendTaskMessage(&msg_slave_clk);
         }
         else
         {
@@ -265,9 +256,13 @@ void TIMER_Task(void *parameter)
         }
 
         // check if both have been set
-        if (us_timestamp_ISR != 0 && us_timestamp_GPS != 0)
+        if (us_timestamp_ISR == 0 || us_timestamp_GPS == 0)
+            continue;
+
+
+        if (clk_correct_state == CLK_CORRECT_NONE)
         {
-            if (clk_correct_state == CLK_CORRECT_NONE)
+            if (isr_utc == gps_utc)
             {
                 ram_shared.drift_total_us = us_timestamp_ISR - us_timestamp_GPS; // determine difference
                 if (llabs(ram_shared.drift_total_us % ram_shared.current_period_us) > DRIFT_CORR_THRESHOLD_US)
@@ -276,16 +271,25 @@ void TIMER_Task(void *parameter)
                     clk_correct_state = CLK_CORRECT_PHASE; // request alignment
                 }
             }
+            else
+            {
+                // determine time difference between local clock and received time
+                int64_t clock_diff_usec = difftime(isr_utc, gps_utc);
+                clock_diff_usec = SEC_TO_US(clock_diff_usec);
 
-            us_timestamp_ISR = 0;
-            us_timestamp_GPS = 0;
+                // Reason to adjust the timer: the UTC time is simply wrong (transmission error, etc.)
+                // or the local timer leads/lags too much
+                if (llabs(clock_diff_usec) >= MAX_ALLOWED_ABS_DIFF_USEC)
+                {
+                    PRINT_LOG("GPS time and local time differ too much");
+                    clk_correct_state = CLK_CORRECT_PHASE;
+                    ram_shared.drift_total_us = clock_diff_usec;
+                }
+            }
         }
 
-        if (msg.cmd == TASK_CMD_SECOND_TICK) // forward tick to slave_clk
-        {
-            msg_slave_clk.utc_time = mcu_utc;
-            sendTaskMessage(&msg_slave_clk);
-        }
+        us_timestamp_ISR = 0;
+        us_timestamp_GPS = 0;
     }
 }
 
