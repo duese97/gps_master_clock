@@ -209,22 +209,10 @@ void TIMER_Task(void *parameter)
                         temp_period += tmp_drift;
                     }
 
-                    isr_utc += USEC_TO_S(ram_shared.drift_total_us);
-
                     ESP_ERROR_CHECK(esp_timer_start_once(periodic_timer, temp_period)); // restart timer
                     clk_correct_state = CLK_CORRECT_PERIOD;
                     PRINT_LOG("Aligning local clock to GPS by %lldus, period %lluus",
                         ram_shared.drift_total_us, temp_period);
-                    
-                    // Accumulate the total drifted time into separate counters
-                    if (ram_shared.drift_total_us > 0)
-                    {
-                        ram_mirror.total_pos_time_corrected_ms += USEC_TO_MS(ram_shared.drift_total_us);
-                    }
-                    else
-                    {
-                        ram_mirror.total_neg_time_corrected_ms += -USEC_TO_MS(ram_shared.drift_total_us);
-                    }
                 }
                 else if (clk_correct_state == CLK_CORRECT_PERIOD)
                 {
@@ -233,13 +221,11 @@ void TIMER_Task(void *parameter)
                     PRINT_LOG("Changed local clock period to %lldus", ram_shared.current_period_us);
                 }
             }
-            else
+
+            isr_utc++;
+            if (isr_utc % 10 == 0)
             {
-                isr_utc++;
-                if (isr_utc % 10 == 0)
-                {
-                    us_timestamp_ISR_10sec = msg.us_timestamp;
-                }
+                us_timestamp_ISR_10sec = msg.us_timestamp;
             }
 
             msg_slave_clk.utc_time = isr_utc;
@@ -255,36 +241,51 @@ void TIMER_Task(void *parameter)
         if (us_timestamp_ISR_10sec == 0 || us_timestamp_GPS_10sec == 0)
             continue;
 
-        if (clk_correct_state == CLK_CORRECT_NONE)
+        ram_shared.drift_total_us = us_timestamp_ISR_10sec - us_timestamp_GPS_10sec; // determine difference
+        PRINT_LOG("Current drift: %lld", ram_shared.drift_total_us);
+
+        // reset timestamps for future evaluations
+        us_timestamp_ISR_10sec = 0;
+        us_timestamp_GPS_10sec = 0;
+
+        // sanity check: abort if difference too large
+        if (ram_shared.drift_total_us > SEC_TO_US(10))
         {
-            ram_shared.drift_total_us = us_timestamp_ISR_10sec - us_timestamp_GPS_10sec; // determine difference
-            PRINT_LOG("Current drift: %lld", ram_shared.drift_total_us);
-            if (isr_utc == gps_utc)
+            PRINT_LOG("GPS signal lost, timestamps differ too much");
+            continue;
+        }
+
+        // do not interfere if a correction is ongoing
+        if (clk_correct_state != CLK_CORRECT_NONE)
+        {
+            continue;
+        }
+
+        // determine time difference between local clock and received time
+        int64_t clock_diff_ms = difftime(isr_utc, gps_utc);
+        clock_diff_ms = SEC_TO_MS(clock_diff_ms);
+
+        // Reason to adjust the timer: the UTC time is simply wrong (transmission error, etc.)
+        // or the local timer leads/lags too much
+        if (llabs(clock_diff_ms) >= MAX_ALLOWED_ABS_DIFF_MSEC)
+        {
+            PRINT_LOG("GPS time and local time differ too much");
+            isr_utc = gps_utc;
+
+            // Accumulate the total drifted time into separate counters
+            if (clock_diff_ms > 0)
             {
-                if (llabs(ram_shared.drift_total_us) > DRIFT_CORR_THRESHOLD_US)
-                {
-                    clk_correct_state = CLK_CORRECT_PHASE; // request alignment
-                }
+                ram_mirror.total_pos_time_corrected_ms += clock_diff_ms;
             }
             else
             {
-                // determine time difference between local clock and received time
-                int64_t clock_diff_usec = difftime(isr_utc, gps_utc);
-                clock_diff_usec = SEC_TO_US(clock_diff_usec);
-
-                // Reason to adjust the timer: the UTC time is simply wrong (transmission error, etc.)
-                // or the local timer leads/lags too much
-                if (llabs(clock_diff_usec) >= MAX_ALLOWED_ABS_DIFF_USEC)
-                {
-                    PRINT_LOG("GPS time and local time differ too much");
-                    clk_correct_state = CLK_CORRECT_PHASE;
-                    ram_shared.drift_total_us = clock_diff_usec;
-                }
+                ram_mirror.total_neg_time_corrected_ms += -clock_diff_ms;
             }
         }
-
-        us_timestamp_ISR_10sec = 0;
-        us_timestamp_GPS_10sec = 0;
+        else if (llabs(ram_shared.drift_total_us) > DRIFT_CORR_THRESHOLD_US)
+        {
+            clk_correct_state = CLK_CORRECT_PHASE; // request alignment
+        }
     }
 }
 

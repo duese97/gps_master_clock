@@ -30,7 +30,7 @@
 // The amount of time that the local second timebase can drift away from the 'correct' time.
 // A bit of 'wiggle' room is left, since the correction requires starting and stopping the
 // timer interrupt.
-#define MAX_ALLOWED_ABS_DIFF_USEC 2000000LL
+#define MAX_ALLOWED_ABS_DIFF_MSEC 2000LL
 
 
 #define NUM_DRIFT_EVALUATIONS   60*10
