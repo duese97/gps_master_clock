@@ -23,7 +23,7 @@ static void print_stats(void)
     static char* runtime_stat_buffer_ptr; // ~40B per task, 
 
     // some general stats:
-    PRINT_LOG(
+    LOG(
         "General:\n"
         "\tFree heap: %lu, minimum free heap: %lu\n"
         "\tTotal corrected: pos:%lus neg:%lus\n"
@@ -43,7 +43,7 @@ static void print_stats(void)
             runtime_stat_buffer_ptr = NULL;
         }
 
-        PRINT_LOG("Re-allocating, task num changed from %u to %u", last_num_tasks, curr_num_tasks);
+        LOG("Re-allocating, task num changed from %u to %u", last_num_tasks, curr_num_tasks);
 
         // see :https://www.freertos.org/Documentation/02-Kernel/04-API-references/03-Task-utilities/00-Task-utilities#vtaskgetruntimestats
         // around 40B per task -> double it for safety
@@ -56,7 +56,7 @@ static void print_stats(void)
     if (runtime_stat_buffer_ptr != NULL) // make sure allocation worked
     {
         vTaskGetRunTimeStats(runtime_stat_buffer_ptr);
-        PRINT_LOG("Runtime stats:\n%s", runtime_stat_buffer_ptr);
+        LOG("Runtime stats:\n%s", runtime_stat_buffer_ptr);
     }
 }
 
@@ -69,7 +69,7 @@ void take_tz_mutex(void)
     
     if (xSemaphoreTake(tz_mutex, portMAX_DELAY) != pdTRUE)
     {
-        PRINT_LOG("Unable to take TZ lock");
+        LOG("Unable to take TZ lock");
     }
 }
 
@@ -117,7 +117,7 @@ void SLAVE_CLK_Task(void *parameter)
                     if (commissioning)
                     {
                         clock_minutes_diff += msg.slave_advance_minutes;
-                        PRINT_LOG("Minutes left to step: %d", clock_minutes_diff);
+                        LOG("Minutes left to step: %d", clock_minutes_diff);
                     }
                     
                     break;
@@ -155,7 +155,7 @@ void SLAVE_CLK_Task(void *parameter)
                     {
                         setenv("TZ", timezone_europe_berlin, 1);
                         timezone_env_ptr = getenv("TZ");
-                        PRINT_LOG("Initially allocating timezone: %s", timezone_env_ptr);
+                        LOG("Initially allocating timezone: %s", timezone_env_ptr);
                     }
                     else // already allocated, can copy value
                     {
@@ -194,7 +194,7 @@ void SLAVE_CLK_Task(void *parameter)
                         if (minutes_lead < MAX_LOCAL_CLOCK_LEAD_MINUTES)
                         {
                             clock_minutes_diff = -minutes_lead; // this way is 'shorter'
-                            PRINT_LOG("Local time leads slightly, with the GPS time about to wrap"); // TODO: correct print/handling?
+                            LOG("Local time leads slightly, with the GPS time about to wrap"); // TODO: correct print/handling?
                             continue;
                         }
                     }
@@ -203,16 +203,16 @@ void SLAVE_CLK_Task(void *parameter)
                         if (clock_minutes_diff < -MAX_LOCAL_CLOCK_LEAD_MINUTES) // if difference too large -> need to wrap around
                         {
                             clock_minutes_diff = MINUTES_PER_12H - clock_minutes_diff;
-                            PRINT_LOG("Local time leads too much, wrapping around");
+                            LOG("Local time leads too much, wrapping around");
                         }
                         else // difference is not too much, we can just wait
                         {
-                            PRINT_LOG("Local time slightly leads, waiting %d minutes ...", clock_minutes_diff);
+                            LOG("Local time slightly leads, waiting %d minutes ...", clock_minutes_diff);
                             continue;
                         }
                     }
 
-                    PRINT_LOG("%02ld:%02ld -> %d minutes time difference to target -> %02d:%02d(%02d:%02d)",
+                    LOG("%02ld:%02ld -> %d minutes time difference to target -> %02d:%02d(%02d:%02d)",
                         ram_mirror.current_slave_minutes_12o_clock / 60, ram_mirror.current_slave_minutes_12o_clock % 60,
                         clock_minutes_diff,
                         target_local_time.tm_hour % 12, target_local_time.tm_min,

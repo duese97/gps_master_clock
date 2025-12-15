@@ -518,7 +518,7 @@ bool menu_statemachine(btn_state_t btn_state, bool* menu_changed)
             break;
         }
         default:
-            PRINT_LOG("Unknown or unhandled top menu state: %d", menu_state);
+            LOG("Unknown or unhandled top menu state: %d", menu_state);
             break;
     }
 

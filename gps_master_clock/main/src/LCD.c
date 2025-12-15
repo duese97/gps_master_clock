@@ -390,12 +390,12 @@ void LCD_Task(void *parameter)
 
     if (LCD_I2C_begin(NUM_COLUMNS, NUM_ROWS) != ESP_OK)
     { // in case no display was found
-        PRINT_LOG("Unable to setup LCD I2C!");
+        LOG("Unable to setup LCD I2C!");
         use_display = false;
     }
     else
     {
-        PRINT_LOG("LCD init done");
+        LOG("LCD init done");
     }
 
     btn_timer = xTimerCreate(
@@ -425,7 +425,7 @@ void LCD_Task(void *parameter)
         msg.btn_state = BTN_VERY_LONG_PRESS;
         sendTaskMessage(&msg);
 
-        PRINT_LOG("Button pressed at boot, starting commissioning");
+        LOG("Button pressed at boot, starting commissioning");
     }
 
     if (use_display)
@@ -509,7 +509,7 @@ void LCD_Task(void *parameter)
                     turn_off_time = 0; // "ack", so that we do not need to come here over and over
                     use_display = false;
                     LCD_I2C_backlight(false);
-                    PRINT_LOG("Turning off display due to inactivity");
+                    LOG("Turning off display due to inactivity");
                 }
 
                 if (is_commissioning == false)
@@ -524,7 +524,7 @@ void LCD_Task(void *parameter)
             }
             case TASK_CMD_BTN_PRESS:
             {
-                PRINT_LOG("Button press: %u", msg.btn_state);
+                LOG("Button press: %u", msg.btn_state);
 
                 use_display = true;
                 LCD_I2C_backlight(true); // enable backlight (if it was not already on)
@@ -546,7 +546,7 @@ void LCD_Task(void *parameter)
             }
             default:
             {
-                PRINT_LOG("Unknow message received: %d", msg.cmd);
+                LOG("Unknow message received: %d", msg.cmd);
                 break;
             }
         }

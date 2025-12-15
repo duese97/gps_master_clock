@@ -150,12 +150,12 @@ void TIMER_Task(void *parameter)
             // check if time is actually different, in case more than one message comes per second
             if (gps_utc != 0 && gps_utc == msg.utc_time)
             {
-                PRINT_LOG("Ignoring message, already processed GPS time in this second");
+                LOG("Ignoring message, already processed GPS time in this second");
                 continue;
             }
             else if (clk_correct_state != CLK_CORRECT_NONE)
             {
-                PRINT_LOG("Clock correction ongoing, skipping and setting new time");
+                LOG("Clock correction ongoing, skipping and setting new time");
                 continue;
             }
 
@@ -167,9 +167,9 @@ void TIMER_Task(void *parameter)
                 {
                     qsort(drift_per_sec, NUM_DRIFT_EVALUATIONS, sizeof(drift_per_sec[0]), comp);
                     ram_shared.current_period_us = drift_per_sec[NUM_DRIFT_EVALUATIONS / 2];
-                    PRINT_LOG("Current period: %lld", ram_shared.current_period_us);
+                    LOG("Current period: %lld", ram_shared.current_period_us);
                     num_drift_evals = 0;
-                    clk_correct_state = CLK_CORRECT_PERIOD;
+                    clk_correct_state = CLK_CORRECT_PHASE;
                 }
             }
 
@@ -212,7 +212,7 @@ void TIMER_Task(void *parameter)
 
                     ESP_ERROR_CHECK(esp_timer_start_once(periodic_timer, temp_period)); // restart timer
                     clk_correct_state = CLK_CORRECT_PERIOD;
-                    PRINT_LOG("Aligning local clock to GPS by %lldus, period %lluus",
+                    LOG("Aligning local clock to GPS by %lldus, period %lluus",
                         ram_shared.drift_total_us, temp_period);
                 }
                 else if (clk_correct_state == CLK_CORRECT_PERIOD)
@@ -231,7 +231,7 @@ void TIMER_Task(void *parameter)
 
                     ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, ram_shared.current_period_us)); // restart timer
                     clk_correct_state = CLK_CORRECT_NONE;
-                    PRINT_LOG("Changed local clock period to %lldus", ram_shared.current_period_us);
+                    LOG("Changed local clock period to %lldus", ram_shared.current_period_us);
                 }
             }
 
@@ -246,7 +246,7 @@ void TIMER_Task(void *parameter)
         }
         else
         {
-            PRINT_LOG("Unknown command: %u", msg.cmd);
+            LOG("Unknown command: %u", msg.cmd);
             continue;
         }
 
@@ -255,7 +255,7 @@ void TIMER_Task(void *parameter)
             continue;
 
         ram_shared.drift_total_us = us_timestamp_ISR_10sec - us_timestamp_GPS_10sec; // determine difference
-        PRINT_LOG("Current drift: %lld", ram_shared.drift_total_us);
+        LOG("Current drift: %lld", ram_shared.drift_total_us);
 
         // reset timestamps for future evaluations
         us_timestamp_ISR_10sec = 0;
@@ -264,7 +264,7 @@ void TIMER_Task(void *parameter)
         // sanity check: abort if difference too large
         if (ram_shared.drift_total_us > SEC_TO_US(10))
         {
-            PRINT_LOG("GPS signal lost, timestamps differ too much");
+            LOG("GPS signal lost, timestamps differ too much");
             continue;
         }
 
@@ -282,7 +282,7 @@ void TIMER_Task(void *parameter)
         // or the local timer leads/lags too much
         if (llabs(clock_diff_ms) >= MAX_ALLOWED_ABS_DIFF_MSEC)
         {
-            PRINT_LOG("GPS time and local time differ too much");
+            LOG("GPS time and local time differ too much");
             isr_utc = gps_utc;
 
             // Accumulate the total drifted time into separate counters
@@ -328,7 +328,7 @@ void NEO6M_Task(void *parameter)
         { // timed out or any other error
             if (lock_state != GPS_LOCK_LOST) // only need to set state / send message once
             {
-                PRINT_LOG("No GPS signal");
+                LOG("No GPS signal");
                 lock_state = GPS_LOCK_LOST;
                 msg_locked.lock_state = GPS_LOCK_LOST;
                 sendTaskMessage(&msg_locked);
@@ -352,7 +352,7 @@ void NEO6M_Task(void *parameter)
         res = TinyGPS_wrapper_crack_datetime(&gps_local_time, &msg_gps_time.utc_time, &age);
         if (res != 0)
         {
-            PRINT_LOG("Unable to crack datetime, result: %d", res);
+            LOG("Unable to crack datetime, result: %d", res);
             msg_gps_time.us_timestamp = 0;
             continue;
         }
@@ -369,7 +369,7 @@ void NEO6M_Task(void *parameter)
         
         if (lock_state == GPS_LOCK_UNINITIALIZED)
         {
-            PRINT_LOG("Inital lock, age: %lu GPS UTC: %lld", age, msg_gps_time.utc_time);
+            LOG("Inital lock, age: %lu GPS UTC: %lld", age, msg_gps_time.utc_time);
         }
 
         if (lock_state != GPS_LOCKED) // avoid sending same message over and over, if lock did not change

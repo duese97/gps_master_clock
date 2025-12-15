@@ -108,7 +108,7 @@ esp_err_t LCD_I2C_begin(uint8_t cols, uint8_t lines)
     esp_err_t ret = i2c_new_master_bus(&bus_conf, &bus_handle);
 	if (ret != ESP_OK)
 	{
-		PRINT_LOG("Unable add new master: %d", ret);
+		LOG("Unable add new master: %d", ret);
 	}
 
 	if (ret == ESP_OK)
@@ -116,7 +116,7 @@ esp_err_t LCD_I2C_begin(uint8_t cols, uint8_t lines)
 		ret = i2c_master_bus_add_device(bus_handle, &dev_conf, &dev_handle);
 		if (ret != ESP_OK)
 		{
-			PRINT_LOG("Unable to add new device: %d", ret);
+			LOG("Unable to add new device: %d", ret);
 		}
 	}
 
@@ -126,7 +126,7 @@ esp_err_t LCD_I2C_begin(uint8_t cols, uint8_t lines)
 		ret = i2c_master_probe(bus_handle, dev_conf.device_address, max_wait_ticks);
 		if (ret != ESP_OK)
 		{
-			PRINT_LOG("Probe failed: %d", ret);
+			LOG("Probe failed: %d", ret);
 		}
 	}
 

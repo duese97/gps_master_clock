@@ -28,12 +28,12 @@
     static TaskHandle_t taskHandle##taskname;                  \
     static StaticTask_t taskBuffer##taskname;                  \
     static QueueHandle_t queueHandle##taskname;                \
-    static uint8_t queueStorageArea##taskname[queueElemByteCnt];
+    static uint8_t queueStorageArea##taskname[queueElemByteCnt]
 
 #define SETUP_TASK_VARS_NO_QUEUE(taskname, stacksize)  \
     static StackType_t taskStack##taskname[stacksize]; \
     static TaskHandle_t taskHandle##taskname;          \
-    static StaticTask_t taskBuffer##taskname;
+    static StaticTask_t taskBuffer##taskname
 
 #define SETUP_QUEUE(taskname, queueElemCnt)                  \
     static StaticQueue_t queue##taskname;                    \
@@ -55,10 +55,12 @@
     )
 
 /* Messaging */
-#define QUEUE_LEN_GENERAL 3
-#define QUEUE_ELEM_LEN sizeof(task_msg_t)
-#define QUEUE_STORAGE_GENERAL (QUEUE_LEN_GENERAL * QUEUE_ELEM_LEN)
-#define QUEUE_MAX_BLOCK_MS 100
+#define QUEUE_LEN_GENERAL       3
+#define QUEUE_LEN_LOGGING       10
+#define QUEUE_ELEM_LEN          sizeof(task_msg_t)
+#define QUEUE_STORAGE_GENERAL   (QUEUE_LEN_GENERAL * QUEUE_ELEM_LEN)
+#define QUEUE_STORAGE_LOGGING   (QUEUE_LEN_LOGGING * QUEUE_ELEM_LEN)
+#define QUEUE_MAX_BLOCK_MS      100
 
 // static stack sizes (printf related stuff needs a lot of RAM)
 #define STACKSIZE_NEO6M     4096
@@ -66,6 +68,7 @@
 #define STACKSIZE_LCD       4096
 #define STACKSIZE_PWR       2028
 #define STACKSIZE_TIMER     4096
+#define STACKSIZE_LOGGING   4096
 
 // testing utility
 #define MAX_COMMAND_LENGTH  16
@@ -81,7 +84,8 @@ enum
 enum
 {
     // priorities (higher number = higher prio)
-    TASK_PRIO_LCD = 1,
+    TASK_PRIO_LOGGING = 1,
+    TASK_PRIO_LCD,
     TASK_PRIO_SLAVE_CLK,
     TASK_PRIO_TIMER,
     TASK_PRIO_NEO6M,
@@ -89,18 +93,21 @@ enum
 };
 
 // task stacks, task handles (for inter task communication) and messaging
-SETUP_TASK_VARS(LCD, STACKSIZE_LCD, QUEUE_STORAGE_GENERAL)
-SETUP_TASK_VARS(SLAVE_CLK, STACKSIZE_SLAVE_CLK, QUEUE_STORAGE_GENERAL)
-SETUP_TASK_VARS(TIMER, STACKSIZE_TIMER, QUEUE_STORAGE_GENERAL)
-SETUP_TASK_VARS_NO_QUEUE(NEO6M, STACKSIZE_NEO6M)
-SETUP_TASK_VARS_NO_QUEUE(PWR, STACKSIZE_PWR)
+SETUP_TASK_VARS(LCD, STACKSIZE_LCD, QUEUE_STORAGE_GENERAL);
+SETUP_TASK_VARS(SLAVE_CLK, STACKSIZE_SLAVE_CLK, QUEUE_STORAGE_GENERAL);
+SETUP_TASK_VARS(TIMER, STACKSIZE_TIMER, QUEUE_STORAGE_GENERAL);
+SETUP_TASK_VARS_NO_QUEUE(NEO6M, STACKSIZE_NEO6M);
+SETUP_TASK_VARS_NO_QUEUE(PWR, STACKSIZE_PWR);
+SETUP_TASK_VARS(LOGGING, STACKSIZE_LOGGING, QUEUE_STORAGE_LOGGING);
+
 
 // for fast and uncomplicated assignment of task ID<->queue
 static const QueueHandle_t *handleLookup[] =
 {
-        [TASK_LCD]      = &queueHandleLCD,
-        [TASK_SLAVE_CLK] = &queueHandleSLAVE_CLK,
-        [TASK_TIMER]    = &queueHandleTIMER,
+        [TASK_LCD]          = &queueHandleLCD,
+        [TASK_SLAVE_CLK]    = &queueHandleSLAVE_CLK,
+        [TASK_TIMER]        = &queueHandleTIMER,
+        [TASK_LOGGING]      = &queueHandleLOGGING,
 };
 
 // for logging
@@ -155,7 +162,7 @@ static esp_err_t load_nvs_data(nvs_handle_t nvs_handle)
     esp_err_t err = nvs_get_blob(nvs_handle, KEY_RAM_MIRROR, (void *)&ram_mirror, &value_len);
     if (err != ESP_OK)
     {
-        PRINT_LOG("Unable to obtain data, error: %d", err);
+        LOG("Unable to obtain data, error: %d", err);
     }    
     return err;
 }
@@ -172,11 +179,11 @@ static esp_err_t save_nvs_data(nvs_handle_t nvs_handle)
     }
     if (err != ESP_OK)
     {
-        PRINT_LOG("Unable to store data, error: %d", err);
+        LOG("Unable to store data, error: %d", err);
     }
     else
     {
-        PRINT_LOG("Performed store #%lu", ram_mirror.mirror_saved_times);
+        LOG("Performed store #%lu", ram_mirror.mirror_saved_times);
     }
     return err;
 }
@@ -202,7 +209,7 @@ static esp_err_t inital_nvs_load(bool soft_reset)
     nvs_handle_t nvs_handle = {0};
 
     // Open NVS handle
-    PRINT_LOG("Opening Non-Volatile Storage (NVS) handle...");
+    LOG("Opening Non-Volatile Storage (NVS) handle...");
     err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
 
 #if SET_NVS_DEFAULTS == 0
@@ -213,15 +220,15 @@ static esp_err_t inital_nvs_load(bool soft_reset)
         // Check if the RAM mirror can be used
         if (soft_reset)
         { // there is hope to load a valid ram mirror
-            PRINT_LOG("Detected soft reset");
+            LOG("Detected soft reset");
             if (ram_mirror.magic_word == RAM_MIRROR_VALID_MAGIC)
             { // back up the data, in case a future power cycle happens
-                PRINT_LOG("Trying to save valid RAM mirror to NVS...");
+                LOG("Trying to save valid RAM mirror to NVS...");
                 err = save_nvs_data(nvs_handle);
             }
             else
             { // try to read from NVS
-                PRINT_LOG("RAM config could be corrupt (magic word is 0x%08lX), trying to load NVS to RAM mirror...",
+                LOG("RAM config could be corrupt (magic word is 0x%08lX), trying to load NVS to RAM mirror...",
                     ram_mirror.magic_word);
                 err = load_nvs_data(nvs_handle);
                 loaded_from_nvs = true;
@@ -231,7 +238,7 @@ static esp_err_t inital_nvs_load(bool soft_reset)
         {
             err = load_nvs_data(nvs_handle);
             loaded_from_nvs = true;
-            PRINT_LOG("Trying to load NVS to RAM mirror after hard reset...");
+            LOG("Trying to load NVS to RAM mirror after hard reset...");
         }
     
         if (err == ESP_OK)
@@ -239,31 +246,31 @@ static esp_err_t inital_nvs_load(bool soft_reset)
             if (loaded_from_nvs && ram_mirror.magic_word != RAM_MIRROR_VALID_MAGIC) // load worked, but somehow got garbage
             {
                 err = ESP_ERR_INVALID_CRC;
-                PRINT_LOG("Unexpected magic word in loaded data: %08lX", ram_mirror.magic_word);
+                LOG("Unexpected magic word in loaded data: %08lX", ram_mirror.magic_word);
             }
         }
         else if (loaded_from_nvs)
         {
-            PRINT_LOG("Nothing to load from");
+            LOG("Nothing to load from");
         }
     }
     
     if (err != ESP_OK) // in case any of the operations failed: Try to re-init with defaults
 #endif // SET_NVS_DEFAULTS == 0
     {
-        PRINT_LOG("Re-initializing NVS...");
+        LOG("Re-initializing NVS...");
         ram_mirror = ram_mirror_default;
         err = save_nvs_data(nvs_handle);
         if (err == ESP_OK)
         {
-            PRINT_LOG("Set defaults done");
+            LOG("Set defaults done");
         }
         else
         {
-            PRINT_LOG("Unable to set defaults");
+            LOG("Unable to set defaults");
         }
     }
-    PRINT_LOG(
+    LOG(
         "Using config:\n"
         "\tcurrent_slave_minutes_12o_clock: %ld (%02ld:%02ld)\n"
         "\ttotal_pos_time_corrected: %lu total_neg_time_corrected_ms: %lu\n"
@@ -281,7 +288,7 @@ static esp_err_t inital_nvs_load(bool soft_reset)
         ram_mirror.magic_word
     );
 
-    PRINT_LOG("Closing NVS");
+    LOG("Closing NVS");
     nvs_close(nvs_handle);
 
     return err;
@@ -326,18 +333,6 @@ void esp_task_wdt_isr_user_handler(void)
 // Exported
 //---------------------------------------------------------------------------
 
-void serial_print_custom(void)
-{
-    size_t print_len = strlen(print_buf);
-    if (print_len <= 0)
-        return;
-
-    if (print_len >= sizeof(print_buf))
-        print_len = sizeof(print_buf);
-
-    uart_write_bytes(UART_NUM_0, print_buf, print_len);
-}
-
 bool receiveTaskMessage(task_type_t dst, uint32_t timeout, task_msg_t *msg)
 {
     bool success = false;
@@ -349,7 +344,7 @@ bool receiveTaskMessage(task_type_t dst, uint32_t timeout, task_msg_t *msg)
     }
     if (!handle)
     {
-        PRINT_LOG("Invalid destination task %d", dst);
+        LOG("Invalid destination task %d", dst);
     }
     else if (xQueueReceive(handle, (void *)msg, timeout) == pdTRUE)
     {
@@ -370,11 +365,11 @@ bool sendTaskMessage(task_msg_t *msg)
 
     if (!handle)
     {
-        PRINT_LOG("Invalid destination task %d", msg->dst);
+        LOG("Invalid destination task %d", msg->dst);
     }
     else if (xQueueSend(handle, (void *)msg, QUEUE_MAX_BLOCK_MS) != pdTRUE)
     {
-        PRINT_LOG("Queue send failed, dst: %u, cmd: %u", msg->dst, msg->cmd);
+        LOG("Queue send failed, dst: %u, cmd: %u", msg->dst, msg->cmd);
     }
     else
     {
@@ -442,7 +437,7 @@ void handle_power_bad(void)
                 power_bad_count++;
                 if (power_bad_count == MIN_PWR_BAD_CNT) // only do it once
                 {
-                    PRINT_LOG("Power bad, shutting down tasks");
+                    LOG("Power bad, shutting down tasks");
                     
                     // Tasks which are a bit more delicate, let them finish what they are doing right now
                     task_msg_t msg = {.cmd = TASK_CMD_SHUTDOWN, .dst = TASK_SLAVE_CLK };
@@ -451,7 +446,7 @@ void handle_power_bad(void)
                     sendTaskMessage(&msg);
 
                     wait_shutdown();
-                    PRINT_LOG("Shutdown complete, storing..");
+                    LOG("Shutdown complete, storing..");
 
                     // it's now OK to save the system state
                     store_ram_mirror();
@@ -465,7 +460,7 @@ void handle_power_bad(void)
                 power_good_count++;
                 if (power_good_count == MIN_PWR_GOOD_CNT) // only do it once
                 {
-                    PRINT_LOG("Power recovered, resuming tasks");
+                    LOG("Power recovered, resuming tasks");
 
                     power_bad_count = 0;
                     power_good_count = 0;
@@ -497,6 +492,25 @@ void PWR_Task(void *parameter)
     }
 }
 
+void LOGGING_Task(void *parameter)
+{
+    task_msg_t msg;
+    while(1)
+    {
+        // wait for new logs
+        if (receiveTaskMessage(TASK_LOGGING, portMAX_DELAY, &msg) == false)
+            continue;
+
+        // reject any messages not related to logging
+        if (msg.cmd != TASK_CMD_LOG)
+            continue;
+
+        // print out data, can be blocking since this task is low prio
+        uart_write_bytes(UART_NUM_0, msg.log_ptr, msg.log_len);
+        vPortFree(msg.log_ptr); // free pointer afterwards
+    }
+}
+
 static void await_and_handle_testcodes(void)
 {
 #if USE_TESTCODE == 1
@@ -505,7 +519,7 @@ static void await_and_handle_testcodes(void)
     char buf;
     int res;
 
-    PRINT_LOG(
+    LOG(
         "ONLY FOR TESTING!!!\n"
         "\tWaiting for input of firmware test codes, to simulate errors.\n"
         "\tSend the following commands in the quotes to accomplish a function:\n"
@@ -533,7 +547,7 @@ static void await_and_handle_testcodes(void)
         if (buf == '\t') // check for terminator
         {
             command_buf[received_bytes] = '\0'; // properly terminate
-            PRINT_LOG("Received command: '%s'", command_buf);
+            LOG("Received command: '%s'", command_buf);
 
             int cmd_num = 0;
             res = sscanf(command_buf, "TEST:%d", &cmd_num); // parse it
@@ -595,25 +609,27 @@ void app_main(void)
     };
     esp_pm_configure(&pm_config);
 
-    PRINT_LOG("\nStarting application. Reset reason: %d\n", reason);
+    LOG("\nStarting application. Reset reason: %d\n", reason);
 
     // If the reset reason is not a power cycle, it's likely due to some SW issue
     bool soft_reset = reason != ESP_RST_UNKNOWN && reason != ESP_RST_POWERON;
     esp_err_t err= inital_nvs_load(soft_reset);
     if (err != ESP_OK)
     {
-        PRINT_LOG("Error (%s) while handling NVS!", esp_err_to_name(err));
+        LOG("Error (%s) while handling NVS!", esp_err_to_name(err));
     }
 
     SETUP_QUEUE(SLAVE_CLK, QUEUE_LEN_GENERAL);
     SETUP_QUEUE(TIMER, QUEUE_LEN_GENERAL);
     SETUP_QUEUE(LCD, QUEUE_LEN_GENERAL);
+    SETUP_QUEUE(LOGGING, QUEUE_LEN_LOGGING);
 
     taskHandleNEO6M     = CREATE_TASK_STATIC(NEO6M);
-    taskHandleSLAVE_CLK  = CREATE_TASK_STATIC(SLAVE_CLK);
+    taskHandleSLAVE_CLK = CREATE_TASK_STATIC(SLAVE_CLK);
     taskHandleTIMER     = CREATE_TASK_STATIC(TIMER);
     taskHandleLCD       = CREATE_TASK_STATIC(LCD);
     taskHandlePWR       = CREATE_TASK_STATIC(PWR);
+    taskHandleLOGGING   = CREATE_TASK_STATIC(LOGGING);
 
     await_and_handle_testcodes();
 }

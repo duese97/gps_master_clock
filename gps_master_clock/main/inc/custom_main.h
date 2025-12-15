@@ -10,6 +10,7 @@
 #include "esp_timer.h" // for micorsecond timer
 
 #include <time.h> // for time_t
+#include <string.h> // for memcpy
 
 // EEPROM emulation
 #include "nvs.h"
@@ -60,6 +61,7 @@ typedef enum
   TASK_LCD,
   TASK_SLAVE_CLK,
   TASK_TIMER,
+  TASK_LOGGING,
 } task_type_t;
 
 
@@ -81,6 +83,8 @@ typedef enum
   TASK_CMD_GPS_TIME,
   TASK_CMD_LOCAL_TIME,
   TASK_CMD_SHUTDOWN,
+
+  TASK_CMD_LOG,
 
   NUM_TASK_CMD
 } task_cmd_t;
@@ -120,6 +124,12 @@ typedef struct
     btn_state_t btn_state;
     uint8_t slave_advance_minutes;
     bool commissioning;
+
+    struct
+    {
+      char* log_ptr;
+      int log_len;
+    };
   };
 } task_msg_t;
 
@@ -169,7 +179,6 @@ extern ram_shared_t ram_shared;
 
 
 /* exported functions */
-void serial_print_custom(void);
 bool receiveTaskMessage(task_type_t dst, uint32_t timeout, task_msg_t *msg);
 bool sendTaskMessage(task_msg_t *msg);
 bool sendTaskMessageISR(task_msg_t *msg);
@@ -183,16 +192,22 @@ esp_err_t store_ram_mirror(void);
 #define VA_ARGS(...) , ##__VA_ARGS__
 
 // thread safe printing/sharing of UART
-#define PRINT_LOG(fmt, ...)                                                                 \
+#define LOG(fmt, ...)                                                                       \
   do                                                                                        \
   {                                                                                         \
     if (xUartSemaphore == NULL)                                                             \
       break;                                                                                \
     if (xSemaphoreTake(xUartSemaphore, MAX_LOG_WAIT_MS) != pdTRUE)                          \
       break;                                                                                \
-    snprintf(print_buf, MAX_LOG_LEN,                                                        \
+    task_msg_t log_msg = {.dst = TASK_LOGGING, .cmd = TASK_CMD_LOG};                        \
+    log_msg.log_len = snprintf(print_buf, MAX_LOG_LEN,                                      \
              "%08lu %s(): " fmt "\n", ESP_IDF_MILLIS(), __FUNCTION__ VA_ARGS(__VA_ARGS__)); \
-    serial_print_custom();                                                                  \
+    log_msg.log_ptr = pvPortMalloc(log_msg.log_len);                                        \
+    if (log_msg.log_ptr)                                                                    \
+    {                                                                                       \
+      memcpy(log_msg.log_ptr, print_buf, log_msg.log_len);                                  \
+      sendTaskMessage(&log_msg);                                                            \
+    }                                                                                       \
     xSemaphoreGive(xUartSemaphore);                                                         \
   } while (0)
 
