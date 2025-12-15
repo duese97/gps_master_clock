@@ -43,7 +43,6 @@ enum
     STATUS_SLAVE_CLOCK,
     STATUS_DRIFT_TOTAL,
     STATUS_LAST_CONNECTED,
-    STATUS_CURR_PERIOD,
     NUM_STATUS_IDX
 };
 
@@ -234,11 +233,6 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
         {
             LCD_I2C_printf(DISH_ICO_STR WAVE_ICO_STR " %8lds ago",
                 (int32_t)(USEC_TO_S(ram_shared.gps_last_connected_us)));
-            break;
-        }
-        case STATUS_CURR_PERIOD:
-        {
-            LCD_I2C_printf("Period %7lluus", ram_shared.current_period_us);
             break;
         }
         default:

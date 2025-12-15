@@ -75,8 +75,6 @@ void TIMER_Task(void *parameter)
     time_t gps_utc = 0, isr_utc = 0;
     int64_t us_timestamp_ISR_10sec = 0, us_timestamp_GPS_10sec = 0;
 
-    ram_shared.current_period_us = SECOND_TIMER_PERIOD_US;
-
     int clk_correct_state = CLK_CORRECT_NONE;
     bool started_once = false;
 
@@ -91,7 +89,7 @@ void TIMER_Task(void *parameter)
             { // inital startup
                 started_once = true;
                 isr_utc = msg.utc_time;
-                ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, ram_shared.current_period_us));
+                ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US));
             }
 
             // check if time is actually different, in case more than one message comes per second
@@ -131,7 +129,7 @@ void TIMER_Task(void *parameter)
                 
                 if (clk_correct_state == CLK_CORRECT_PHASE)
                 {
-                    uint64_t temp_period = ram_shared.current_period_us;
+                    uint64_t temp_period = SECOND_TIMER_PERIOD_US;
                     int64_t tmp_drift = ram_shared.drift_total_us % temp_period;
                     
                     if (ram_shared.drift_total_us > 0)
@@ -150,9 +148,9 @@ void TIMER_Task(void *parameter)
                 }
                 else if (clk_correct_state == CLK_CORRECT_FINALIZE)
                 {
-                    ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, ram_shared.current_period_us)); // restart timer
+                    ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, SECOND_TIMER_PERIOD_US)); // restart timer
                     clk_correct_state = CLK_CORRECT_NONE;
-                    LOG("Changed local clock period to %lldus", ram_shared.current_period_us);
+                    LOG("Clock aligned");
                 }
             }
 
@@ -184,6 +182,7 @@ void TIMER_Task(void *parameter)
         // sanity check: abort if difference too large
         if (ram_shared.drift_total_us > SEC_TO_US(10))
         {
+            ram_shared.drift_total_us = INT64_MAX; // mark invalid
             LOG("GPS signal lost, timestamps differ too much");
             continue;
         }

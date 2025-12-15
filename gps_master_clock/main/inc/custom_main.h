@@ -160,7 +160,6 @@ typedef struct
 {
   int64_t drift_total_us;
   int64_t gps_last_connected_us;
-  uint64_t current_period_us;
   uint32_t operating_seconds; // seconds since last boot
 } ram_shared_t;
 
