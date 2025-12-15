@@ -200,6 +200,7 @@ void TIMER_Task(void *parameter)
                 {
                     uint64_t temp_period = ram_shared.current_period_us;
                     int64_t tmp_drift = ram_shared.drift_total_us % temp_period;
+                    
                     if (ram_shared.drift_total_us > 0)
                     {
                         temp_period -= tmp_drift;
@@ -216,6 +217,18 @@ void TIMER_Task(void *parameter)
                 }
                 else if (clk_correct_state == CLK_CORRECT_PERIOD)
                 {
+                    int64_t upper = SECOND_TIMER_PERIOD_US + MAX_PERIOD_CORRECT_US;
+                    int64_t lower = SECOND_TIMER_PERIOD_US - MAX_PERIOD_CORRECT_US;
+
+                    if (ram_shared.current_period_us > upper)
+                    {
+                        ram_shared.current_period_us = upper;
+                    }
+                    else if (ram_shared.current_period_us < lower)
+                    {
+                        ram_shared.current_period_us = lower;
+                    }
+
                     ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, ram_shared.current_period_us)); // restart timer
                     clk_correct_state = CLK_CORRECT_NONE;
                     PRINT_LOG("Changed local clock period to %lldus", ram_shared.current_period_us);

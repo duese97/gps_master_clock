@@ -28,13 +28,18 @@
 #define MAX_LOCAL_CLOCK_LEAD_MINUTES  5
 
 // The amount of time that the local second timebase can drift away from the 'correct' time.
-// A bit of 'wiggle' room is left, since the correction requires starting and stopping the
-// timer interrupt.
 #define MAX_ALLOWED_ABS_DIFF_MSEC 2000LL
 
+// Number of evaluations to take into account for evaluating the drift (one per second)
+#define NUM_DRIFT_EVALUATIONS   60*15
 
-#define NUM_DRIFT_EVALUATIONS   60*10
-#define DRIFT_CORR_THRESHOLD_US 100000 // minimum threshold, at which a correction will be performed
+// minimum threshold, at which a correction will be performed
+#define DRIFT_CORR_THRESHOLD_US 100000
+
+// The maximum amount of microseconds the clock period can be adjusted
+// The high resolution timer has +-10ppm
+#define MAX_PERIOD_CORRECT_US 20
+
 
 #define ARRAY_LEN(x) (sizeof(x)/sizeof(x[0]))
 
