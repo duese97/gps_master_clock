@@ -23,7 +23,7 @@ enum
 {
     CLK_CORRECT_NONE,
     CLK_CORRECT_PHASE,
-    CLK_CORRECT_PERIOD,
+    CLK_CORRECT_FINALIZE,
 };
 
 
@@ -44,8 +44,6 @@ const int intr_alloc_flags =
     0;
 #endif // CONFIG_UART_ISR_IN_IRAM
 
-static int num_drift_evals = 0;
-static int64_t drift_per_sec[NUM_DRIFT_EVALUATIONS];
 
 static void periodic_timer_callback(void* arg)
 {
@@ -63,57 +61,6 @@ static const esp_timer_create_args_t periodic_timer_args =
     /* name is optional, but may help identify the timer when debugging */
     .name = "secTimer"
 };
-
-static void calc_linear_regression(int64_t* src_arr, int src_len, float* slope, float* y_intercept)
-{
-    float x_average = (src_len - 1) / 2; // assumes equally spaced x values
-    float y_average = 0;
-
-    for (int idx = 0; idx < src_len; idx++)
-    {
-        y_average += src_arr[idx];
-    }
-    y_average /= src_len;
-
-    float std_deviation_x = 0;
-    float std_deviation_y = 0;
-    for (int idx = 0; idx < src_len; idx++)
-    {
-        float x_square = (idx - x_average); x_square *= x_square;
-        std_deviation_x += x_square;
-
-        float y_square = (src_arr[idx] - y_average); y_square *= y_square;
-        std_deviation_y += y_square;
-    }
-    // why (src_len - 1) -> we take it from a sample and not a population (just scr_len)
-    std_deviation_x = sqrt(std_deviation_x / (src_len - 1));
-    std_deviation_y = sqrt(std_deviation_y / (src_len - 1));
-
-    float covariance_xy = 0;
-    for (int idx = 0; idx < src_len; idx++)
-    {
-        covariance_xy += ((idx - x_average) * (src_arr[idx] - y_average));
-    }
-    covariance_xy *= (1.0 / (src_len - 1));
-
-    float correlation_xy = covariance_xy / (std_deviation_x * std_deviation_y);
-
-    *slope = correlation_xy * std_deviation_x / std_deviation_y;
-    *y_intercept = -1.0f * (*slope) * x_average + y_average;
-}
-
-
-static int comp(const void *elem1, const void *elem2)
-{
-    int64_t f = *((int64_t *)elem1);
-    int64_t s = *((int64_t *)elem2);
-    if (f > s)
-        return 1;
-    if (f < s)
-        return -1;
-    return 0;
-}
-
 
 void TIMER_Task(void *parameter)
 {
@@ -159,20 +106,6 @@ void TIMER_Task(void *parameter)
                 continue;
             }
 
-            if (started_once)
-            {
-                drift_per_sec[num_drift_evals] = msg.us_timestamp - last_gps_connection_us; // determine difference
-                num_drift_evals++;
-                if (num_drift_evals >= NUM_DRIFT_EVALUATIONS)
-                {
-                    qsort(drift_per_sec, NUM_DRIFT_EVALUATIONS, sizeof(drift_per_sec[0]), comp);
-                    ram_shared.current_period_us = drift_per_sec[NUM_DRIFT_EVALUATIONS / 2];
-                    LOG("Current period: %lld", ram_shared.current_period_us);
-                    num_drift_evals = 0;
-                    clk_correct_state = CLK_CORRECT_PHASE;
-                }
-            }
-
             last_gps_connection_us = msg.us_timestamp;
             ram_mirror.last_connected_utc = msg.utc_time;
             gps_utc = msg.utc_time;
@@ -211,24 +144,12 @@ void TIMER_Task(void *parameter)
                     }
 
                     ESP_ERROR_CHECK(esp_timer_start_once(periodic_timer, temp_period)); // restart timer
-                    clk_correct_state = CLK_CORRECT_PERIOD;
+                    clk_correct_state = CLK_CORRECT_FINALIZE;
                     LOG("Aligning local clock to GPS by %lldus, period %lluus",
                         ram_shared.drift_total_us, temp_period);
                 }
-                else if (clk_correct_state == CLK_CORRECT_PERIOD)
+                else if (clk_correct_state == CLK_CORRECT_FINALIZE)
                 {
-                    int64_t upper = SECOND_TIMER_PERIOD_US + MAX_PERIOD_CORRECT_US;
-                    int64_t lower = SECOND_TIMER_PERIOD_US - MAX_PERIOD_CORRECT_US;
-
-                    if (ram_shared.current_period_us > upper)
-                    {
-                        ram_shared.current_period_us = upper;
-                    }
-                    else if (ram_shared.current_period_us < lower)
-                    {
-                        ram_shared.current_period_us = lower;
-                    }
-
                     ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, ram_shared.current_period_us)); // restart timer
                     clk_correct_state = CLK_CORRECT_NONE;
                     LOG("Changed local clock period to %lldus", ram_shared.current_period_us);
@@ -240,7 +161,6 @@ void TIMER_Task(void *parameter)
             {
                 us_timestamp_ISR_10sec = msg.us_timestamp;
             }
-
             msg_slave_clk.utc_time = isr_utc;
             sendTaskMessage(&msg_slave_clk);
         }
