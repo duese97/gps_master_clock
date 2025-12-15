@@ -123,7 +123,12 @@ typedef struct
     struct tm local_time;
     btn_state_t btn_state;
     uint8_t slave_advance_minutes;
-    bool commissioning;
+
+    struct
+    {
+      bool comm_slave_1;
+      bool comm_slave_2;
+    };
 
     struct
     {
@@ -152,7 +157,8 @@ typedef struct
   uint16_t pulse_len_ms;
   uint16_t pulse_pause_ms;
 
-  bool hbridge_last_pol;
+  bool hbridge1_last_pol;
+  bool hbridge2_last_pol;
 
 } ram_mirror_t;
 

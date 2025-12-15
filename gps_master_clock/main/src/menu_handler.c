@@ -15,7 +15,9 @@ typedef enum
 {
     MENU_SEL_EXIT,
     MENU_SEL_MASTER_ADVANCE,
-    MENU_SEL_SLAVE_ADVANCE,
+    MENU_SEL_SLAVES_ADVANCE,
+    MENU_SEL_SLAVE_1_ADVANCE,
+    MENU_SEL_SLAVE_2_ADVANCE,
     MENU_SEL_PULSE_LEN,
     MENU_SEL_PULSE_PAUSE,
     MENU_SEL_FULL_RESET,
@@ -74,6 +76,7 @@ typedef struct
 {
     const char* selector_str;
     const submenu_t* submenu_ptr;
+    void (*submenu_enter_fn)(void);
 } main_menu_t;
 
 //---------------------------------------------------------------------------
@@ -141,6 +144,41 @@ static const submenu_t master_advance_submenu =
 // Slave advance sub menu
 //---------------------------------------------------------------------------
 
+static void slaves_commissioning_fn(void)
+{
+    task_msg_t msg =
+    {
+        .dst = TASK_SLAVE_CLK,
+        .cmd = TASK_CMD_COMMISSIONING,
+        .comm_slave_1 = true,
+        .comm_slave_2 = true
+    };
+    sendTaskMessage(&msg);
+}
+
+static void slave_1_commissioning_fn(void)
+{
+    task_msg_t msg =
+    {
+        .dst = TASK_SLAVE_CLK,
+        .cmd = TASK_CMD_COMMISSIONING,
+        .comm_slave_1 = true,
+        .comm_slave_2 = false
+    };
+    sendTaskMessage(&msg);
+}
+
+static void slave_2_commissioning_fn(void)
+{
+    task_msg_t msg =
+    {
+        .dst = TASK_SLAVE_CLK,
+        .cmd = TASK_CMD_COMMISSIONING,
+        .comm_slave_1 = false,
+        .comm_slave_2 = true
+    };
+    sendTaskMessage(&msg);
+}
 static void slave_advance_fn(val_union_t val)
 {
     // Send the message with desired slave advance minutes to task
@@ -151,7 +189,7 @@ static void slave_advance_fn(val_union_t val)
     };
     sendTaskMessage(&msg);
 }
-static const submenu_elem_t slave_advance_submenu_elems[] =
+static const submenu_elem_t slaves_advance_submenu_elems[] =
 {
     {
         .selector_str = ">"BACK_ICO_STR"  +1m  +1h"
@@ -167,11 +205,25 @@ static const submenu_elem_t slave_advance_submenu_elems[] =
         .modifier_fn = slave_advance_fn,
     },
 };
-static const submenu_t slave_advance_submenu =
+static const submenu_t slaves_advance_submenu =
 {
-    .submenu_initial_title_str = "Slave advance",
-    .num_submenu_elem = ARRAY_LEN(slave_advance_submenu_elems),
-    .submenu_elems = slave_advance_submenu_elems,
+    .submenu_initial_title_str = ">Slave I&II adv.",
+    .num_submenu_elem = ARRAY_LEN(slaves_advance_submenu_elems),
+    .submenu_elems = slaves_advance_submenu_elems,
+};
+
+static const submenu_t slave_1_advance_submenu =
+{
+    .submenu_initial_title_str = ">Slave I adv.",
+    .num_submenu_elem = ARRAY_LEN(slaves_advance_submenu_elems),
+    .submenu_elems = slaves_advance_submenu_elems,
+};
+
+static const submenu_t slave_2_advance_submenu =
+{
+    .submenu_initial_title_str = ">Slave II adv.",
+    .num_submenu_elem = ARRAY_LEN(slaves_advance_submenu_elems),
+    .submenu_elems = slaves_advance_submenu_elems,
 };
 
 //---------------------------------------------------------------------------
@@ -305,10 +357,23 @@ static const main_menu_t main_menu[] =
         .selector_str = ">Master advance",
         .submenu_ptr = &master_advance_submenu,
     },
-    [MENU_SEL_SLAVE_ADVANCE] =
+    [MENU_SEL_SLAVES_ADVANCE] =
     {
-        .selector_str = ">Slave advance",
-        .submenu_ptr = &slave_advance_submenu,
+        .selector_str = ">Slave I&II adv.",
+        .submenu_ptr = &slaves_advance_submenu,
+        .submenu_enter_fn = slaves_commissioning_fn
+    },
+    [MENU_SEL_SLAVE_1_ADVANCE] =
+    {
+        .selector_str = ">Slave I adv.",
+        .submenu_ptr = &slave_1_advance_submenu,
+        .submenu_enter_fn = slave_1_commissioning_fn
+    },
+    [MENU_SEL_SLAVE_2_ADVANCE] =
+    {
+        .selector_str = ">Slave II adv.",
+        .submenu_ptr = &slave_2_advance_submenu,
+        .submenu_enter_fn = slave_2_commissioning_fn
     },
     [MENU_SEL_PULSE_LEN] =
     {
@@ -426,6 +491,11 @@ bool menu_statemachine(btn_state_t btn_state, bool* menu_changed)
                     curr_sub_menu_idx = 0;
     
                     sub_ptr = main_ptr->submenu_ptr;
+
+                    if (main_ptr->submenu_enter_fn)
+                    {
+                        main_ptr->submenu_enter_fn();
+                    }
     
                     // Only needed once: Title of submenu
                     LCD_I2C_setCursor(0, 0);
