@@ -16,13 +16,14 @@
 #define LCM1602_ADDR            0x27
 
 #define NEO6M_UART              UART_NUM_2
-#define NEO6M_RX_PIN            GPIO_NUM_16
-#define NEO6M_TX_PIN            GPIO_NUM_17
+#define NEO6M_RX_PIN            GPIO_NUM_17 // Where the data from NEO6M will be received (modules TX pin)
+#define NEO6M_TX_PIN            GPIO_NUM_16 // Where the data to NEO6M will be transmitted (modules RX pin)
 
-#define POWER_GOOD_IO           GPIO_NUM_23
+#define POWER_GOOD_IO           GPIO_NUM_35
+#define POWER_GOOD_LVL          1
 
 #define USR_BUTTON_IO           GPIO_NUM_34
-#define USR_BUTTON_PRESS_LVL    0
+#define USR_BUTTON_PRESS_LVL    1
 
 #define LOGGING_UART_PORT       UART_NUM_0
 #define LOGGING_UART_TX         GPIO_NUM_1

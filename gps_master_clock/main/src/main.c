@@ -429,7 +429,7 @@ void handle_power_bad(void)
     int power_bad_count = 0, power_good_count = 0;
     while(1)
     {
-        if (gpio_get_level(POWER_GOOD_IO) == 0) // periodically check the power good pin
+        if (gpio_get_level(POWER_GOOD_IO) != POWER_GOOD_LVL) // periodically check the power good pin
         {
             power_good_count = 0; // reset good counter immediately
             if (power_bad_count < MIN_PWR_BAD_CNT)
@@ -447,6 +447,8 @@ void handle_power_bad(void)
 
                     wait_shutdown();
                     LOG("Shutdown complete, storing..");
+
+                    ram_mirror.pwr_bad = true; // store power bad flag for later debugging
 
                     // it's now OK to save the system state
                     store_ram_mirror();
@@ -468,6 +470,10 @@ void handle_power_bad(void)
                     // resume all tasks
                     vTaskResume(taskHandleLCD);
                     vTaskResume(taskHandleSLAVE_CLK);
+
+                    ram_mirror.pwr_bad = false; // reset flag, recovery OK
+                    store_ram_mirror();
+
                     break;
                 }
             }

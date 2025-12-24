@@ -153,6 +153,7 @@ typedef struct
   bool hbridge1_last_pol;
   bool hbridge2_last_pol;
 
+  bool pwr_bad;
 } ram_mirror_t;
 
 // global shared RAM data, which is not persisted

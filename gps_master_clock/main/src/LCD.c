@@ -370,6 +370,8 @@ void btn_handler(bool timer_triggered)
 
 void LCD_Task(void *parameter)
 {
+    vTaskDelay(2000); // wait for power to stabilize
+
     // contains the current time, is of fixed length (why +6 -> compiler needs this to remove annoying warning)
     char time_print_buff[MAX_TIME_PRINT_LEN + 1 + 6] = "??:??:?? ??.??.???? DST: ?    ";
     int status_screen_idx = STATUS_START_IDX;
@@ -437,7 +439,22 @@ void LCD_Task(void *parameter)
         LCD_I2C_createChar(GRAM_WAVE_ICON_IDX, wave_icon_charmap);
 
         vTaskDelay(1000);
+
+        if (ram_mirror.pwr_bad)
+        {
+            LCD_I2C_setCursor(0, 0);
+            LCD_I2C_print("Power outage    ");
+            LCD_I2C_setCursor(0, 1);
+            LCD_I2C_print("Recovering...   ");
+
+            ram_mirror.pwr_bad = false; // ACK flag, once we displayed it
+            store_ram_mirror();
+
+            vTaskDelay(1000);
+        }
     }
+
+
 
     while(1)
     {
