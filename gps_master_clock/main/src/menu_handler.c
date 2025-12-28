@@ -95,6 +95,11 @@ static val_union_t local_storage; // scratch buffer for changing values
 // Master advance sub menu
 //---------------------------------------------------------------------------
 
+static void master_advance_init(void)
+{
+    local_storage.i32 = 0; // init with zero, for a fresh start
+}
+
 static void master_advance_fn(val_union_t val)
 {
     // increment the minutes as desired
@@ -137,7 +142,7 @@ static const submenu_t master_advance_submenu =
     .submenu_initial_title_str = "Master advance",
     .num_submenu_elem = ARRAY_LEN(master_advance_submenu_elems),
     .submenu_elems = master_advance_submenu_elems,
-    .init_value = {.i32_ptr = &(ram_mirror.current_slave_minutes_12o_clock)},
+    //.init_value = {.i32_ptr = &(ram_mirror.current_slave_minutes_12o_clock)},
 };
 
 //---------------------------------------------------------------------------
@@ -356,6 +361,7 @@ static const main_menu_t main_menu[] =
     {
         .selector_str = ">Master advance",
         .submenu_ptr = &master_advance_submenu,
+        .submenu_enter_fn = master_advance_init,
     },
     [MENU_SEL_SLAVES_ADVANCE] =
     {

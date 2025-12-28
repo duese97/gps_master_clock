@@ -117,9 +117,9 @@ char print_buf[MAX_LOG_LEN];
 // default values
 const ram_mirror_t ram_mirror_default =
 {
-    .pulse_len_ms = 100,
-    .pulse_pause_ms = 100,
-    .magic_word = RAM_MIRROR_VALID_MAGIC,
+    .pulse_len_ms   = 150,
+    .pulse_pause_ms = 150,
+    .magic_word     = RAM_MIRROR_VALID_MAGIC,
 };
 
 // Configure parameters of an UART driver

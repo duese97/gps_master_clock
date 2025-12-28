@@ -19,7 +19,7 @@
 // '13:08:00 15.11.2025 DST: 0    ' = 26 chars + 4 spaces + 1 null
 #define MAX_TIME_PRINT_LEN              30
 
-#define DEBOUNCE_DURATION_MS            ( 50 / portTICK_PERIOD_MS )
+#define DEBOUNCE_DURATION_MS            ( 30 / portTICK_PERIOD_MS )
 // every press length between DEBOUNCE_DURATION_MS..LONG_PRESS_DURATION_MS is
 // considered a short press
 #define LONG_PRESS_DURATION_MS          ( 500 / portTICK_PERIOD_MS )
@@ -258,7 +258,7 @@ void btn_handler(bool timer_triggered)
     switch (msg.btn_state)
     {
         case BTN_NO_PRESS:
-        {
+        {            
             if (timer_triggered)
             { // should not happen, only for sanity: must always be called by ISR
                 restart = true;
@@ -275,6 +275,7 @@ void btn_handler(bool timer_triggered)
         {
             if (btn_lvl == USR_BUTTON_PRESS_LVL && timer_triggered == true) // check timer state, in case any edge ISR was still pending
             {
+                TOGGLE_ONBOARD_LED();
                 msg.btn_state = BTN_SHORT_PRESS;
                 tim_period = LONG_PRESS_DURATION_MS;
                 gpio_set_intr_type(USR_BUTTON_IO, GPIO_INTR_POSEDGE); // await rising edge
@@ -289,6 +290,7 @@ void btn_handler(bool timer_triggered)
         {
             if (btn_lvl == USR_BUTTON_PRESS_LVL && timer_triggered == true) // still pressed, will be a long press
             {
+                TOGGLE_ONBOARD_LED();
                 msg.btn_state = BTN_LONG_PRESS;
                 tim_period = VERY_LONG_PRESS_DURATION_MS;
             }
@@ -307,6 +309,7 @@ void btn_handler(bool timer_triggered)
         {
             if (btn_lvl == USR_BUTTON_PRESS_LVL && timer_triggered == true) // still pressed, will be a very long press
             {
+                TOGGLE_ONBOARD_LED();
                 msg.btn_state = BTN_VERY_LONG_PRESS;
             }
             else if (timer_triggered == false) // was released
@@ -325,12 +328,9 @@ void btn_handler(bool timer_triggered)
             if (timer_triggered == false) // was released
             {
                 sendTaskMessageISR(&msg);
-                restart = true;
             }
-            else // everything else -> error
-            {
-                restart = true;
-            }
+
+            restart = true;
             break;
         }
         default:
@@ -343,6 +343,8 @@ void btn_handler(bool timer_triggered)
 
     if (restart)
     {
+        gpio_set_level(GPIO_LED, 1); // disable in any case
+
         if (timer_triggered == false) // if we are in a timer context -> its already stopped
         {
             xTimerStopFromISR(btn_timer, &xHigherPriorityTaskWoken); // make sure the timer is off
@@ -383,7 +385,7 @@ void LCD_Task(void *parameter)
     bool is_commissioning = false;
 
     uint32_t turn_off_time = ESP_IDF_MILLIS() + DISPLAY_TURN_OFF_INITAL_MS; // set inital timeout when screen shall turn off
-
+    
     if (LCD_I2C_begin(NUM_COLUMNS, NUM_ROWS) != ESP_OK)
     { // in case no display was found
         LOG("Unable to setup LCD I2C!");

@@ -8,7 +8,6 @@
 #include "custom_main.h"
 #include "bsp.h"
 
-#define TOGGLE_ONBOARD_LED() do{gpio_set_level(GPIO_LED, gpio_get_level(GPIO_LED) ? 0 : 1);}while(0)
 
 // Set timezone for Europe/Berlin (https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv)
 static const char* timezone_europe_berlin = "CET-1CEST,M3.5.0,M10.5.0/3";
@@ -92,10 +91,16 @@ void SLAVE_CLK_Task(void *parameter)
     bool ignore_sec_tick = false;
 
     gpio_set_direction(GPIO_LED, GPIO_MODE_INPUT_OUTPUT);
-    gpio_set_direction(H_BRIDGE1_DIR, GPIO_MODE_INPUT_OUTPUT);
-    gpio_set_direction(H_BRIDGE1_EN, GPIO_MODE_INPUT_OUTPUT);
-    gpio_set_direction(H_BRIDGE2_DIR, GPIO_MODE_INPUT_OUTPUT);
-    gpio_set_direction(H_BRIDGE2_EN, GPIO_MODE_INPUT_OUTPUT);
+    gpio_set_direction(H_BRIDGE1_A, GPIO_MODE_OUTPUT);
+    gpio_set_direction(H_BRIDGE1_B, GPIO_MODE_OUTPUT);
+    gpio_set_direction(H_BRIDGE2_C, GPIO_MODE_OUTPUT);
+    gpio_set_direction(H_BRIDGE2_D, GPIO_MODE_OUTPUT);
+
+    // Make sure everything is off by default
+    gpio_set_level(H_BRIDGE1_A, 0);
+    gpio_set_level(H_BRIDGE1_B, 0);
+    gpio_set_level(H_BRIDGE2_C, 0);
+    gpio_set_level(H_BRIDGE2_D, 0);
 
     while(1)
     {
@@ -239,29 +244,31 @@ void SLAVE_CLK_Task(void *parameter)
             // set polarity of the h bridges
             if (comm_slave_1 && !comm_slave_2)
             {
-                gpio_set_level(H_BRIDGE1_DIR, ram_mirror.hbridge1_last_pol);
-                gpio_set_level(H_BRIDGE1_EN, 1);
+                gpio_set_level(H_BRIDGE1_A, ram_mirror.hbridge1_last_pol);
+                gpio_set_level(H_BRIDGE1_B, !ram_mirror.hbridge1_last_pol);
             }
             else if (comm_slave_2 && !comm_slave_1)
             {
-                gpio_set_level(H_BRIDGE2_DIR, ram_mirror.hbridge2_last_pol);
-                gpio_set_level(H_BRIDGE2_EN, 1);
+                gpio_set_level(H_BRIDGE2_C, ram_mirror.hbridge2_last_pol);
+                gpio_set_level(H_BRIDGE2_D, !ram_mirror.hbridge2_last_pol);
             }
             else
             { // either none or both commissioning
-                gpio_set_level(H_BRIDGE1_DIR, ram_mirror.hbridge1_last_pol);
-                gpio_set_level(H_BRIDGE2_DIR, ram_mirror.hbridge2_last_pol);
+                gpio_set_level(H_BRIDGE1_A, ram_mirror.hbridge1_last_pol);
+                gpio_set_level(H_BRIDGE2_C, ram_mirror.hbridge2_last_pol);
 
-                gpio_set_level(H_BRIDGE1_EN, 1);
-                gpio_set_level(H_BRIDGE2_EN, 1);
+                gpio_set_level(H_BRIDGE1_B, !ram_mirror.hbridge1_last_pol);
+                gpio_set_level(H_BRIDGE2_D, !ram_mirror.hbridge2_last_pol);
             }
 
             // enable bridges, let current flow
             vTaskDelay(ram_mirror.pulse_len_ms / portTICK_PERIOD_MS);
 
             // disable bridges again
-            gpio_set_level(H_BRIDGE1_EN, 0);
-            gpio_set_level(H_BRIDGE2_EN, 0);
+            gpio_set_level(H_BRIDGE1_A, 0);
+            gpio_set_level(H_BRIDGE1_B, 0);
+            gpio_set_level(H_BRIDGE2_C, 0);
+            gpio_set_level(H_BRIDGE2_D, 0);
 
             TOGGLE_ONBOARD_LED();
             vTaskDelay(ram_mirror.pulse_pause_ms / portTICK_PERIOD_MS);

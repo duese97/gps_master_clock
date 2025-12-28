@@ -29,10 +29,10 @@
 #define LOGGING_UART_TX         GPIO_NUM_1
 #define LOGGING_UART_RX         GPIO_NUM_3
 
-#define H_BRIDGE1_DIR            GPIO_NUM_26
-#define H_BRIDGE1_EN             GPIO_NUM_27
+#define H_BRIDGE1_A             GPIO_NUM_26
+#define H_BRIDGE1_B             GPIO_NUM_27
 
-#define H_BRIDGE2_DIR            GPIO_NUM_25
-#define H_BRIDGE2_EN             GPIO_NUM_33
+#define H_BRIDGE2_C             GPIO_NUM_25
+#define H_BRIDGE2_D             GPIO_NUM_13
 
 #endif // _BSP_H_

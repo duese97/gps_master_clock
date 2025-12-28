@@ -45,6 +45,7 @@
 
 #define USE_TESTCODE 1
 
+#define TOGGLE_ONBOARD_LED() do{gpio_set_level(GPIO_LED, gpio_get_level(GPIO_LED) ? 0 : 1);}while(0)
 
 //---------------------------------------------------------------------------
 // Enums
