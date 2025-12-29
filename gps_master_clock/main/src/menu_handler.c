@@ -18,8 +18,7 @@ typedef enum
     MENU_SEL_SLAVES_ADVANCE,
     MENU_SEL_SLAVE_1_ADVANCE,
     MENU_SEL_SLAVE_2_ADVANCE,
-    MENU_SEL_PULSE_LEN,
-    MENU_SEL_PULSE_PAUSE,
+    MENU_SEL_PERIOD_LEN,
     MENU_SEL_FULL_RESET,
 
     MENU_SEL_NUM_ELEM
@@ -97,7 +96,7 @@ static val_union_t local_storage; // scratch buffer for changing values
 
 static void master_advance_init(void)
 {
-    local_storage.i32 = 0; // init with zero, for a fresh start
+    local_storage.i32 = ram_mirror.current_slave_minutes_12o_clock;
 }
 
 static void master_advance_fn(val_union_t val)
@@ -232,16 +231,16 @@ static const submenu_t slave_2_advance_submenu =
 };
 
 //---------------------------------------------------------------------------
-// Pulse length sub menu
+// Period length sub menu
 //---------------------------------------------------------------------------
 
-static void apply_pulse_len_fn(void)
+static void apply_period_len_fn(void)
 {
-    ram_mirror.pulse_len_ms = local_storage.i16;
+    ram_mirror.period_ms = local_storage.i16;
     store_ram_mirror();
 }
 
-static void pulse_pause_len_change_fn(val_union_t val)
+static void period_len_change_fn(val_union_t val)
 {
     local_storage.i16 += val.i16;
     if(local_storage.i16 < abs(val.i16)) // make sure not to allow negative values
@@ -252,7 +251,7 @@ static void pulse_pause_len_change_fn(val_union_t val)
     LCD_I2C_setCursor(0, 0);
     LCD_I2C_printf("%5dms         ", local_storage.i16);
 }
-static const submenu_elem_t pulse_len_submenu_elems[] =
+static const submenu_elem_t period_len_submenu_elems[] =
 {
     {
         .selector_str = ">"BACK_ICO_STR"  +10  -10  OK"
@@ -260,62 +259,24 @@ static const submenu_elem_t pulse_len_submenu_elems[] =
     {
         .selector_str = " "BACK_ICO_STR" >+10  -10  OK",
         .fn_param.i16 = 10,
-        .modifier_fn = pulse_pause_len_change_fn,
+        .modifier_fn = period_len_change_fn,
     },
     {
         .selector_str = " "BACK_ICO_STR"  +10 >-10  OK",
         .fn_param.i16 = -10,
-        .modifier_fn = pulse_pause_len_change_fn,
+        .modifier_fn = period_len_change_fn,
     },
     {
         .selector_str = " "BACK_ICO_STR"  +10  -10 >OK",
-        .apply_fn = apply_pulse_len_fn,
+        .apply_fn = apply_period_len_fn,
     },
 };
-static const submenu_t pulse_len_submenu =
+static const submenu_t period_len_submenu =
 {
-    .submenu_initial_title_str = "Pulse length",
-    .num_submenu_elem = ARRAY_LEN(pulse_len_submenu_elems),
-    .submenu_elems = pulse_len_submenu_elems,
-    .init_value = { .u16_ptr = &(ram_mirror.pulse_len_ms) },
-};
-
-//---------------------------------------------------------------------------
-// Pulse pause sub menu
-//---------------------------------------------------------------------------
-
-static void apply_pulse_pause_fn(void)
-{
-    ram_mirror.pulse_pause_ms = local_storage.i16;
-    store_ram_mirror();
-}
-
-static const submenu_elem_t pulse_pause_submenu_elems[] =
-{
-    {
-        .selector_str = ">"BACK_ICO_STR"  +10  -10  OK"
-    },
-    {
-        .selector_str = " "BACK_ICO_STR" >+10  -10  OK",
-        .fn_param.i16 = 10,
-        .modifier_fn = pulse_pause_len_change_fn,
-    },
-    {
-        .selector_str = " "BACK_ICO_STR"  +10 >-10  OK",
-        .fn_param.i16 = -10,
-        .modifier_fn = pulse_pause_len_change_fn,
-    },
-    {
-        .selector_str = " "BACK_ICO_STR"  +10  -10 >OK",
-        .apply_fn = apply_pulse_pause_fn,
-    },
-};
-static const submenu_t pulse_pause_submenu =
-{
-    .submenu_initial_title_str = "Pulse pause",
-    .num_submenu_elem = ARRAY_LEN(pulse_pause_submenu_elems),
-    .submenu_elems = pulse_pause_submenu_elems,
-    .init_value = { .u16_ptr = &(ram_mirror.pulse_pause_ms) },
+    .submenu_initial_title_str = "Period length",
+    .num_submenu_elem = ARRAY_LEN(period_len_submenu_elems),
+    .submenu_elems = period_len_submenu_elems,
+    .init_value = { .u16_ptr = &(ram_mirror.period_ms) },
 };
 
 //---------------------------------------------------------------------------
@@ -381,15 +342,10 @@ static const main_menu_t main_menu[] =
         .submenu_ptr = &slave_2_advance_submenu,
         .submenu_enter_fn = slave_2_commissioning_fn
     },
-    [MENU_SEL_PULSE_LEN] =
+    [MENU_SEL_PERIOD_LEN] =
     {
-        .selector_str = ">Pulse length",
-        .submenu_ptr = &pulse_len_submenu,
-    },
-    [MENU_SEL_PULSE_PAUSE] =
-    {
-        .selector_str = ">Pulse pause",
-        .submenu_ptr = &pulse_pause_submenu,
+        .selector_str = ">Period length",
+        .submenu_ptr = &period_len_submenu,
     },
     [MENU_SEL_FULL_RESET] =
     {

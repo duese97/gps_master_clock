@@ -262,7 +262,7 @@ void SLAVE_CLK_Task(void *parameter)
             }
 
             // enable bridges, let current flow
-            vTaskDelay(ram_mirror.pulse_len_ms / portTICK_PERIOD_MS);
+            vTaskDelay(ram_mirror.period_ms / portTICK_PERIOD_MS);
 
             // disable bridges again
             gpio_set_level(H_BRIDGE1_A, 0);
@@ -271,7 +271,7 @@ void SLAVE_CLK_Task(void *parameter)
             gpio_set_level(H_BRIDGE2_D, 0);
 
             TOGGLE_ONBOARD_LED();
-            vTaskDelay(ram_mirror.pulse_pause_ms / portTICK_PERIOD_MS);
+            vTaskDelay(ram_mirror.period_ms / portTICK_PERIOD_MS);
 
             // Toggle polarity of H bridge(s) for next time
             if (comm_slave_1 && !comm_slave_2)

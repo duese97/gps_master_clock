@@ -343,7 +343,7 @@ void btn_handler(bool timer_triggered)
 
     if (restart)
     {
-        gpio_set_level(GPIO_LED, 1); // disable in any case
+        gpio_set_level(GPIO_LED, 0); // disable in any case
 
         if (timer_triggered == false) // if we are in a timer context -> its already stopped
         {

@@ -148,13 +148,11 @@ typedef struct
   uint32_t magic_word; // to easily determine if the struct contains valid data
 
   // settings for the pulse waveform
-  uint16_t pulse_len_ms;
-  uint16_t pulse_pause_ms;
-
+  uint16_t period_ms;
   bool hbridge1_last_pol;
   bool hbridge2_last_pol;
 
-  bool pwr_bad;
+  bool pwr_bad; // flag to indicate that the current boot happened prior to a power bad event
 } ram_mirror_t;
 
 // global shared RAM data, which is not persisted
