@@ -45,7 +45,6 @@
 
 #define USE_TESTCODE 1
 
-#define TOGGLE_ONBOARD_LED() do{gpio_set_level(GPIO_LED, gpio_get_level(GPIO_LED) ? 0 : 1);}while(0)
 
 //---------------------------------------------------------------------------
 // Enums
@@ -73,6 +72,7 @@ typedef enum
   TASK_CMD_GPS_LOCK_STATE,
   TASK_CMD_BTN_PRESS,
   TASK_CMD_REFRESH_LCD,
+  TASK_CMD_TOGGLE_LED,
 
   TASK_CMD_GPS_TIME,
   TASK_CMD_LOCAL_TIME,

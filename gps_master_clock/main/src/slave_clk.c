@@ -239,7 +239,6 @@ void SLAVE_CLK_Task(void *parameter)
 
         if (clock_minutes_diff > 0) // no backwards pulses possible
         { // if we come here: do clock pulses
-            TOGGLE_ONBOARD_LED();
 
             // set polarity of the h bridges
             if (comm_slave_1 && !comm_slave_2)
@@ -270,8 +269,7 @@ void SLAVE_CLK_Task(void *parameter)
             gpio_set_level(H_BRIDGE2_C, 0);
             gpio_set_level(H_BRIDGE2_D, 0);
 
-            TOGGLE_ONBOARD_LED();
-            vTaskDelay(ram_mirror.period_ms / portTICK_PERIOD_MS);
+            //vTaskDelay(ram_mirror.period_ms / portTICK_PERIOD_MS);
 
             // Toggle polarity of H bridge(s) for next time
             if (comm_slave_1 && !comm_slave_2)

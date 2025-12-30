@@ -247,15 +247,15 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
 //---------------------------------------------------------------------------
 void btn_handler(bool timer_triggered)
 {
-    static task_msg_t msg = {.dst = TASK_LCD, .cmd = TASK_CMD_BTN_PRESS, .btn_state = BTN_NO_PRESS};
-
+    static task_msg_t msg_press = {.dst = TASK_LCD, .cmd = TASK_CMD_BTN_PRESS, .btn_state = BTN_NO_PRESS};
+    static task_msg_t msg_led_toggle = {.dst = TASK_LCD, .cmd = TASK_CMD_TOGGLE_LED};
 
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     int btn_lvl = gpio_get_level(USR_BUTTON_IO);
     uint32_t tim_period = 0;
     bool restart = false;
 
-    switch (msg.btn_state)
+    switch (msg_press.btn_state)
     {
         case BTN_NO_PRESS:
         {            
@@ -265,7 +265,7 @@ void btn_handler(bool timer_triggered)
             }
             else
             {
-                msg.btn_state = BTN_DEBOUNCE; // reset state back to start
+                msg_press.btn_state = BTN_DEBOUNCE; // reset state back to start
                 tim_period = DEBOUNCE_DURATION_MS; // wait for voltage to stabilize
                 gpio_set_intr_type(USR_BUTTON_IO, GPIO_INTR_DISABLE); // ignore any ISR
             }
@@ -275,8 +275,7 @@ void btn_handler(bool timer_triggered)
         {
             if (btn_lvl == USR_BUTTON_PRESS_LVL && timer_triggered == true) // check timer state, in case any edge ISR was still pending
             {
-                TOGGLE_ONBOARD_LED();
-                msg.btn_state = BTN_SHORT_PRESS;
+                msg_press.btn_state = BTN_SHORT_PRESS;
                 tim_period = LONG_PRESS_DURATION_MS;
                 gpio_set_intr_type(USR_BUTTON_IO, GPIO_INTR_POSEDGE); // await rising edge
             }
@@ -290,13 +289,14 @@ void btn_handler(bool timer_triggered)
         {
             if (btn_lvl == USR_BUTTON_PRESS_LVL && timer_triggered == true) // still pressed, will be a long press
             {
-                TOGGLE_ONBOARD_LED();
-                msg.btn_state = BTN_LONG_PRESS;
+                sendTaskMessageISR(&msg_led_toggle); // indicate that long press is ready
+
+                msg_press.btn_state = BTN_LONG_PRESS;
                 tim_period = VERY_LONG_PRESS_DURATION_MS;
             }
             else if (timer_triggered == false) // button was released
             {
-                sendTaskMessageISR(&msg);
+                sendTaskMessageISR(&msg_press);
                 restart = true;
             }
             else // some weird intermediate state, abort
@@ -309,12 +309,12 @@ void btn_handler(bool timer_triggered)
         {
             if (btn_lvl == USR_BUTTON_PRESS_LVL && timer_triggered == true) // still pressed, will be a very long press
             {
-                TOGGLE_ONBOARD_LED();
-                msg.btn_state = BTN_VERY_LONG_PRESS;
+                msg_press.btn_state = BTN_VERY_LONG_PRESS;
+                sendTaskMessageISR(&msg_led_toggle); // indicate that very long press is ready
             }
             else if (timer_triggered == false) // was released
             {
-                sendTaskMessageISR(&msg);
+                sendTaskMessageISR(&msg_press);
                 restart = true;
             }
             else // everything else -> error
@@ -327,7 +327,7 @@ void btn_handler(bool timer_triggered)
         {
             if (timer_triggered == false) // was released
             {
-                sendTaskMessageISR(&msg);
+                sendTaskMessageISR(&msg_press);
             }
 
             restart = true;
@@ -343,13 +343,11 @@ void btn_handler(bool timer_triggered)
 
     if (restart)
     {
-        gpio_set_level(GPIO_LED, 0); // disable in any case
-
         if (timer_triggered == false) // if we are in a timer context -> its already stopped
         {
             xTimerStopFromISR(btn_timer, &xHigherPriorityTaskWoken); // make sure the timer is off
         }
-        msg.btn_state = BTN_NO_PRESS; // reset state
+        msg_press.btn_state = BTN_NO_PRESS; // reset state
         gpio_set_intr_type(USR_BUTTON_IO, GPIO_INTR_NEGEDGE);
     }
     else if (tim_period)
@@ -465,6 +463,13 @@ void LCD_Task(void *parameter)
 
         switch(msg.cmd)
         {
+            case TASK_CMD_TOGGLE_LED:
+            {
+                gpio_set_level(GPIO_LED, LED_ON_LVL); // disable in any case
+                vTaskDelay(100); // small delay, mostly used in menus anyway, not too bad stalling the LCD task
+                gpio_set_level(GPIO_LED, LED_OFF_LVL); // disable in any case
+                break;
+            }
             case TASK_CMD_GPS_LOCK_STATE:
             {
                 lock_state_local = msg.lock_state;

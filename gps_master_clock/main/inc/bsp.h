@@ -4,7 +4,9 @@
 #include <stdint.h>
 #include "driver/gpio.h"
 
-#define GPIO_LED GPIO_NUM_2
+#define GPIO_LED                GPIO_NUM_2
+#define LED_ON_LVL              1
+#define LED_OFF_LVL             0
 
 // custom pin mapping for I2C
 #define I2C_SCL_IO				GPIO_NUM_22               /*!< gpio number for I2C master clock */
