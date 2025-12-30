@@ -285,7 +285,11 @@ void SLAVE_CLK_Task(void *parameter)
                 // toggle polarity of both h bridges
                 ram_mirror.hbridge1_last_pol = !ram_mirror.hbridge1_last_pol;
                 ram_mirror.hbridge2_last_pol = !ram_mirror.hbridge2_last_pol;
-                
+            }
+            
+            // do not increment when any slave is commissioned with pulses (keep master time as is)
+            if (!comm_slave_2 && !comm_slave_1)
+            {
                 ram_mirror.current_slave_minutes_12o_clock++; // one step closer to the target time
                 ram_mirror.current_slave_minutes_12o_clock %= MINUTES_PER_12H; // keep within 12 hour bounds
             }
