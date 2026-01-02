@@ -35,6 +35,6 @@
 #define H_BRIDGE1_B             GPIO_NUM_27
 
 #define H_BRIDGE2_C             GPIO_NUM_25
-#define H_BRIDGE2_D             GPIO_NUM_13
+#define H_BRIDGE2_D             GPIO_NUM_33
 
 #endif // _BSP_H_

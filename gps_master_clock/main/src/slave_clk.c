@@ -269,8 +269,6 @@ void SLAVE_CLK_Task(void *parameter)
             gpio_set_level(H_BRIDGE2_C, 0);
             gpio_set_level(H_BRIDGE2_D, 0);
 
-            //vTaskDelay(ram_mirror.period_ms / portTICK_PERIOD_MS);
-
             // Toggle polarity of H bridge(s) for next time
             if (comm_slave_1 && !comm_slave_2)
             {
