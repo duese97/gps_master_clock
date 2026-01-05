@@ -15,9 +15,9 @@ typedef enum
 {
     MENU_SEL_EXIT,
     MENU_SEL_MASTER_ADVANCE,
-    MENU_SEL_SLAVES_ADVANCE,
-    MENU_SEL_SLAVE_1_ADVANCE,
-    MENU_SEL_SLAVE_2_ADVANCE,
+    MENU_SEL_LINES_ADVANCE,
+    MENU_SEL_LINE_1_ADVANCE,
+    MENU_SEL_LINE_2_ADVANCE,
     MENU_SEL_PERIOD_LEN,
     MENU_SEL_FULL_RESET,
 
@@ -145,55 +145,55 @@ static const submenu_t master_advance_submenu =
 };
 
 //---------------------------------------------------------------------------
-// Slave advance sub menu
+// Lines advance sub menu
 //---------------------------------------------------------------------------
 
-static void slaves_commissioning_fn(void)
+static void lines_commissioning_fn(void)
 {
     task_msg_t msg =
     {
         .dst = TASK_SLAVE_CLK,
         .cmd = TASK_CMD_COMMISSIONING,
-        .comm_slave_1 = true,
-        .comm_slave_2 = true
+        .comm_line_1 = true,
+        .comm_line_2 = true
     };
     sendTaskMessage(&msg);
 }
 
-static void slave_1_commissioning_fn(void)
+static void line_1_commissioning_fn(void)
 {
     task_msg_t msg =
     {
         .dst = TASK_SLAVE_CLK,
         .cmd = TASK_CMD_COMMISSIONING,
-        .comm_slave_1 = true,
-        .comm_slave_2 = false
+        .comm_line_1 = true,
+        .comm_line_2 = false
     };
     sendTaskMessage(&msg);
 }
 
-static void slave_2_commissioning_fn(void)
+static void line_2_commissioning_fn(void)
 {
     task_msg_t msg =
     {
         .dst = TASK_SLAVE_CLK,
         .cmd = TASK_CMD_COMMISSIONING,
-        .comm_slave_1 = false,
-        .comm_slave_2 = true
+        .comm_line_1 = false,
+        .comm_line_2 = true
     };
     sendTaskMessage(&msg);
 }
-static void slave_advance_fn(val_union_t val)
+static void line_advance_fn(val_union_t val)
 {
-    // Send the message with desired slave advance minutes to task
+    // Send the message with desired line advance minutes to task
     task_msg_t msg = {
-        .cmd = TASK_CMD_SLAVE_ADVANCE_MINUTES,
+        .cmd = TASK_CMD_LINE_ADVANCE_MINUTES,
         .dst = TASK_SLAVE_CLK,
-        .slave_advance_minutes = val.u32
+        .line_advance_minutes = val.u32
     };
     sendTaskMessage(&msg);
 }
-static const submenu_elem_t slaves_advance_submenu_elems[] =
+static const submenu_elem_t lines_advance_submenu_elems[] =
 {
     {
         .selector_str = ">"BACK_ICO_STR"  +1m  +1h"
@@ -201,33 +201,33 @@ static const submenu_elem_t slaves_advance_submenu_elems[] =
     {
         .selector_str = " "BACK_ICO_STR" >+1m  +1h",
         .fn_param.u32 = 1,
-        .modifier_fn = slave_advance_fn,
+        .modifier_fn = line_advance_fn,
     },
     {
         .selector_str = " "BACK_ICO_STR"  +1m >+1h",
         .fn_param.u32 = 60,
-        .modifier_fn = slave_advance_fn,
+        .modifier_fn = line_advance_fn,
     },
 };
-static const submenu_t slaves_advance_submenu =
+static const submenu_t lines_advance_submenu =
 {
-    .submenu_initial_title_str = ">Slave I&II adv.",
-    .num_submenu_elem = ARRAY_LEN(slaves_advance_submenu_elems),
-    .submenu_elems = slaves_advance_submenu_elems,
+    .submenu_initial_title_str = ">Line I&II adv.",
+    .num_submenu_elem = ARRAY_LEN(lines_advance_submenu_elems),
+    .submenu_elems = lines_advance_submenu_elems,
 };
 
-static const submenu_t slave_1_advance_submenu =
+static const submenu_t line_1_advance_submenu =
 {
-    .submenu_initial_title_str = ">Slave I adv.",
-    .num_submenu_elem = ARRAY_LEN(slaves_advance_submenu_elems),
-    .submenu_elems = slaves_advance_submenu_elems,
+    .submenu_initial_title_str = ">Line I adv.",
+    .num_submenu_elem = ARRAY_LEN(lines_advance_submenu_elems),
+    .submenu_elems = lines_advance_submenu_elems,
 };
 
-static const submenu_t slave_2_advance_submenu =
+static const submenu_t line_2_advance_submenu =
 {
-    .submenu_initial_title_str = ">Slave II adv.",
-    .num_submenu_elem = ARRAY_LEN(slaves_advance_submenu_elems),
-    .submenu_elems = slaves_advance_submenu_elems,
+    .submenu_initial_title_str = ">Line II adv.",
+    .num_submenu_elem = ARRAY_LEN(lines_advance_submenu_elems),
+    .submenu_elems = lines_advance_submenu_elems,
 };
 
 //---------------------------------------------------------------------------
@@ -324,23 +324,23 @@ static const main_menu_t main_menu[] =
         .submenu_ptr = &master_advance_submenu,
         .submenu_enter_fn = master_advance_init,
     },
-    [MENU_SEL_SLAVES_ADVANCE] =
+    [MENU_SEL_LINES_ADVANCE] =
     {
-        .selector_str = ">Slave I&II adv.",
-        .submenu_ptr = &slaves_advance_submenu,
-        .submenu_enter_fn = slaves_commissioning_fn
+        .selector_str = ">Line I&II adv.",
+        .submenu_ptr = &lines_advance_submenu,
+        .submenu_enter_fn = lines_commissioning_fn
     },
-    [MENU_SEL_SLAVE_1_ADVANCE] =
+    [MENU_SEL_LINE_1_ADVANCE] =
     {
-        .selector_str = ">Slave I adv.",
-        .submenu_ptr = &slave_1_advance_submenu,
-        .submenu_enter_fn = slave_1_commissioning_fn
+        .selector_str = ">Line I adv.",
+        .submenu_ptr = &line_1_advance_submenu,
+        .submenu_enter_fn = line_1_commissioning_fn
     },
-    [MENU_SEL_SLAVE_2_ADVANCE] =
+    [MENU_SEL_LINE_2_ADVANCE] =
     {
-        .selector_str = ">Slave II adv.",
-        .submenu_ptr = &slave_2_advance_submenu,
-        .submenu_enter_fn = slave_2_commissioning_fn
+        .selector_str = ">Line II adv.",
+        .submenu_ptr = &line_2_advance_submenu,
+        .submenu_enter_fn = line_2_commissioning_fn
     },
     [MENU_SEL_PERIOD_LEN] =
     {

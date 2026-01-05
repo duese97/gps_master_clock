@@ -85,8 +85,8 @@ void SLAVE_CLK_Task(void *parameter)
     task_msg_t msg; // scratch buffer for receiving task messages
     char* timezone_env_ptr = NULL; // points to heap, where timezone string will be buffered
 
-    bool comm_slave_1 = false;
-    bool comm_slave_2 = false;
+    bool comm_line_1 = false;
+    bool comm_line_2 = false;
 
     bool ignore_sec_tick = false;
 
@@ -118,16 +118,16 @@ void SLAVE_CLK_Task(void *parameter)
 
                 case TASK_CMD_COMMISSIONING:
                 {
-                    comm_slave_1 = msg.comm_slave_1;
-                    comm_slave_2 = msg.comm_slave_2;
+                    comm_line_1 = msg.comm_line_1;
+                    comm_line_2 = msg.comm_line_2;
                     clock_minutes_diff = 0;
                     break;
                 }
-                case TASK_CMD_SLAVE_ADVANCE_MINUTES:
+                case TASK_CMD_LINE_ADVANCE_MINUTES:
                 {
-                    if (comm_slave_1 || comm_slave_2)
+                    if (comm_line_1 || comm_line_2)
                     {
-                        clock_minutes_diff += msg.slave_advance_minutes;
+                        clock_minutes_diff += msg.line_advance_minutes;
                         LOG("Minutes left to step: %d", clock_minutes_diff);
                     }
                     
@@ -151,7 +151,7 @@ void SLAVE_CLK_Task(void *parameter)
                         print_stats();
                     }
 
-                    if (comm_slave_1 || comm_slave_2) // if commissioning right now -> skip all of the handling
+                    if (comm_line_1 || comm_line_2) // if commissioning right now -> skip all of the handling
                     {
                         continue;
                     }
@@ -239,54 +239,42 @@ void SLAVE_CLK_Task(void *parameter)
 
         if (clock_minutes_diff > 0) // no backwards pulses possible
         { // if we come here: do clock pulses
+            bool line_1_en = comm_line_1 || !comm_line_2;
+            bool line_2_en = comm_line_2 || !comm_line_1;
 
             // set polarity of the h bridges
-            if (comm_slave_1 && !comm_slave_2)
+            if (line_1_en)
             {
-                gpio_set_level(H_BRIDGE1_A, ram_mirror.hbridge1_last_pol);
-                gpio_set_level(H_BRIDGE1_B, !ram_mirror.hbridge1_last_pol);
-            }
-            else if (comm_slave_2 && !comm_slave_1)
-            {
-                gpio_set_level(H_BRIDGE2_C, ram_mirror.hbridge2_last_pol);
-                gpio_set_level(H_BRIDGE2_D, !ram_mirror.hbridge2_last_pol);
-            }
-            else
-            { // either none or both commissioning
-                gpio_set_level(H_BRIDGE1_A, ram_mirror.hbridge1_last_pol);
-                gpio_set_level(H_BRIDGE2_C, ram_mirror.hbridge2_last_pol);
+                gpio_set_level(H_BRIDGE1_A, ram_mirror.line1_last_pol);
+                gpio_set_level(H_BRIDGE1_B, !ram_mirror.line1_last_pol);
+                
+                // enable bridge, let current flow
+                vTaskDelay(ram_mirror.period_ms / portTICK_PERIOD_MS);
+            
+                // disable bridges again
+                gpio_set_level(H_BRIDGE1_A, 0);
+                gpio_set_level(H_BRIDGE1_B, 0);
 
-                gpio_set_level(H_BRIDGE1_B, !ram_mirror.hbridge1_last_pol);
-                gpio_set_level(H_BRIDGE2_D, !ram_mirror.hbridge2_last_pol);
+                // Toggle polarity of H bridge(s) for next time
+                ram_mirror.line1_last_pol = !ram_mirror.line1_last_pol;
             }
 
-            // enable bridges, let current flow
-            vTaskDelay(ram_mirror.period_ms / portTICK_PERIOD_MS);
-
-            // disable bridges again
-            gpio_set_level(H_BRIDGE1_A, 0);
-            gpio_set_level(H_BRIDGE1_B, 0);
-            gpio_set_level(H_BRIDGE2_C, 0);
-            gpio_set_level(H_BRIDGE2_D, 0);
-
-            // Toggle polarity of H bridge(s) for next time
-            if (comm_slave_1 && !comm_slave_2)
+            // Same as above, but "level out" the current draw a bit between the H bridges
+            if (line_2_en)
             {
-                ram_mirror.hbridge1_last_pol = !ram_mirror.hbridge1_last_pol;
-            }
-            else if (comm_slave_2 && !comm_slave_1)
-            {
-                ram_mirror.hbridge2_last_pol = !ram_mirror.hbridge2_last_pol;
-            }
-            else
-            {                
-                // toggle polarity of both h bridges
-                ram_mirror.hbridge1_last_pol = !ram_mirror.hbridge1_last_pol;
-                ram_mirror.hbridge2_last_pol = !ram_mirror.hbridge2_last_pol;
+                gpio_set_level(H_BRIDGE2_C, ram_mirror.line2_last_pol);
+                gpio_set_level(H_BRIDGE2_D, !ram_mirror.line2_last_pol);
+
+                vTaskDelay(ram_mirror.period_ms / portTICK_PERIOD_MS);
+
+                gpio_set_level(H_BRIDGE2_C, 0);
+                gpio_set_level(H_BRIDGE2_D, 0);
+
+                ram_mirror.line2_last_pol = !ram_mirror.line2_last_pol;
             }
             
             // do not increment when any slave is commissioned with pulses (keep master time as is)
-            if (!comm_slave_2 && !comm_slave_1)
+            if (!comm_line_2 && !comm_line_1)
             {
                 ram_mirror.current_slave_minutes_12o_clock++; // one step closer to the target time
                 ram_mirror.current_slave_minutes_12o_clock %= MINUTES_PER_12H; // keep within 12 hour bounds

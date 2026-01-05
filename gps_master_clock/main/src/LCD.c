@@ -559,8 +559,8 @@ void LCD_Task(void *parameter)
                     msg.cmd = TASK_CMD_COMMISSIONING;
 
                     // initially assume both are commissioning (or not)
-                    msg.comm_slave_1 = is_commissioning;
-                    msg.comm_slave_2 = is_commissioning;
+                    msg.comm_line_1 = is_commissioning;
+                    msg.comm_line_2 = is_commissioning;
                     sendTaskMessage(&msg);
                 }
                 break;

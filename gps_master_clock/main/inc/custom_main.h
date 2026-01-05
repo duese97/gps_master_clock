@@ -67,7 +67,7 @@ typedef enum
   TASK_CMD_COMMISSIONING,
 
   TASK_CMD_SIMULATE_SECOND_TICK,
-  TASK_CMD_SLAVE_ADVANCE_MINUTES,
+  TASK_CMD_LINE_ADVANCE_MINUTES,
 
   TASK_CMD_GPS_LOCK_STATE,
   TASK_CMD_BTN_PRESS,
@@ -116,12 +116,12 @@ typedef struct
     GPS_LOCK_STATE_t lock_state;
     struct tm local_time;
     btn_state_t btn_state;
-    uint8_t slave_advance_minutes;
+    uint8_t line_advance_minutes;
 
     struct
     {
-      bool comm_slave_1;
-      bool comm_slave_2;
+      bool comm_line_1;
+      bool comm_line_2;
     };
 
     struct
@@ -149,8 +149,8 @@ typedef struct
 
   // settings for the pulse waveform
   uint16_t period_ms;
-  bool hbridge1_last_pol;
-  bool hbridge2_last_pol;
+  bool line1_last_pol; // last polarity of line 1
+  bool line2_last_pol; // last polarity of line 2
 
   bool pwr_bad; // flag to indicate that the current boot happened prior to a power bad event
 } ram_mirror_t;
