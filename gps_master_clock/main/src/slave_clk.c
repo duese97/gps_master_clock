@@ -320,17 +320,18 @@ void SLAVE_CLK_Task(void *parameter)
                 // enable bridge, let current flow
                 gpio_set_level(H_BRIDGE1_A, ram_mirror.line1_last_pol);
                 gpio_set_level(H_BRIDGE1_B, !ram_mirror.line1_last_pol);
-                
-                if (is_slave_voltage_ok())
+
+                ram_shared.short_circuit_line_1 = !is_slave_voltage_ok();
+                if (ram_shared.short_circuit_line_1)
+                { // something is wrong, disable the bridge again
+                    LOG("Short circuit when driving line 1");
+                }
+                else
                 { // if voltage is within bounds: Wait for pulse to finish
                     vTaskDelay(ram_mirror.period_ms / portTICK_PERIOD_MS);
 
                     // Toggle polarity of H bridge(s) for next time
                     ram_mirror.line1_last_pol = !ram_mirror.line1_last_pol;
-                }
-                else
-                { // something is wrong, disable the bridge again
-                    LOG("Short circuit when driving line 1");
                 }
                 // disable bridges again
                 gpio_set_level(H_BRIDGE1_A, 0);
@@ -343,14 +344,15 @@ void SLAVE_CLK_Task(void *parameter)
                 gpio_set_level(H_BRIDGE2_C, ram_mirror.line2_last_pol);
                 gpio_set_level(H_BRIDGE2_D, !ram_mirror.line2_last_pol);
 
-                if (is_slave_voltage_ok())
+                ram_shared.short_circuit_line_2 = !is_slave_voltage_ok();
+                if (ram_shared.short_circuit_line_2)
                 {
-                    vTaskDelay(ram_mirror.period_ms / portTICK_PERIOD_MS);
-                    ram_mirror.line2_last_pol = !ram_mirror.line2_last_pol;
+                    LOG("Short circuit when driving line 2");
                 }
                 else
                 {
-                    LOG("Short circuit when driving line 2");
+                    vTaskDelay(ram_mirror.period_ms / portTICK_PERIOD_MS);
+                    ram_mirror.line2_last_pol = !ram_mirror.line2_last_pol;
                 }
 
                 gpio_set_level(H_BRIDGE2_C, 0);
