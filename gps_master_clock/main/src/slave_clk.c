@@ -5,6 +5,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"  // for vTaskGetRunTimeStats
 
+#include "esp_adc/adc_oneshot.h"
+
 #include "custom_main.h"
 #include "bsp.h"
 
@@ -15,6 +17,9 @@ static const char* timezone_gmt = "GMT0";
 
 static SemaphoreHandle_t tz_mutex;
 
+static adc_oneshot_unit_handle_t adc1_handle;
+static adc_cali_handle_t calib_handle;
+static uint32_t slave_relative_minimum_voltage;
 
 static void print_stats(void)
 {
@@ -77,6 +82,45 @@ void give_tz_mutex(void)
     xSemaphoreGive(tz_mutex); 
 }
 
+static uint32_t calc_slave_voltage(void)
+{
+    int raw = 0, voltage = 0, samples;
+
+    for (samples = 0; samples < 4; ++samples)
+    {
+        int tmp;
+        ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, ADC_CHANNEL_4, &tmp));
+
+        raw += tmp;
+    }
+    raw = raw / samples;  
+
+    ESP_ERROR_CHECK(adc_cali_raw_to_voltage(calib_handle, raw, &voltage));
+
+    LOG("Samples: %d Reading: %d Voltage: %d", samples, raw, voltage);
+
+    // we have a 56k <-> 4.7k resistive divider
+    return ((56000.0 + 4700.0) / 4700.0) * voltage;
+}
+
+static bool is_slave_voltage_ok(void)
+{
+    bool result;
+    uint32_t slave_voltage = calc_slave_voltage();
+
+    // sanity check: Absolute value should not be too low (in case inital measurement is already
+    // under fault measured)
+    if (slave_voltage < MIN_SLAVE_VOLTAGE_MV)
+        result = false;
+    // Voltage should not get too low, relative to the inital measurement
+    else if (slave_voltage < slave_relative_minimum_voltage * MAX_SLAVE_VOLTAGE_DEVIATION)
+        result = false;
+    else
+        result = true;
+
+    return result;    
+}
+
 void SLAVE_CLK_Task(void *parameter)
 {
     static task_msg_t local_time_msg = {.dst = TASK_LCD, .cmd = TASK_CMD_LOCAL_TIME };
@@ -101,6 +145,34 @@ void SLAVE_CLK_Task(void *parameter)
     gpio_set_level(H_BRIDGE1_B, 0);
     gpio_set_level(H_BRIDGE2_C, 0);
     gpio_set_level(H_BRIDGE2_D, 0);
+
+
+    // configure the one-shot ADC
+    adc_oneshot_unit_init_cfg_t init_config1 = {
+        .unit_id = ADC_UNIT_1,
+        .ulp_mode = ADC_ULP_MODE_DISABLE,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config1, &adc1_handle));
+
+    adc_oneshot_chan_cfg_t config = {
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+        .atten = ADC_ATTEN_DB_12,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, ADC_CHANNEL_4, &config)); // ADC_CHANNEL_4 = GPIO_NUM_32
+
+    adc_cali_line_fitting_config_t cali_config = {
+        .unit_id = ADC_UNIT_1,
+        .atten = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    ESP_ERROR_CHECK(adc_cali_create_scheme_line_fitting(&cali_config, &calib_handle));
+
+    // Determine what the inital driving voltage for the clock slaves is (assumes
+    // there is no issue upon boot). Then calculate what the relative threshold is, below which
+    // no operation is possible.
+    slave_relative_minimum_voltage = calc_slave_voltage() * MAX_SLAVE_VOLTAGE_DEVIATION;
+
+    LOG("Initial slave voltage: %lumV", slave_relative_minimum_voltage);
 
     while(1)
     {
@@ -245,18 +317,24 @@ void SLAVE_CLK_Task(void *parameter)
             // set polarity of the h bridges
             if (line_1_en)
             {
+                // enable bridge, let current flow
                 gpio_set_level(H_BRIDGE1_A, ram_mirror.line1_last_pol);
                 gpio_set_level(H_BRIDGE1_B, !ram_mirror.line1_last_pol);
                 
-                // enable bridge, let current flow
-                vTaskDelay(ram_mirror.period_ms / portTICK_PERIOD_MS);
-            
+                if (is_slave_voltage_ok())
+                { // if voltage is within bounds: Wait for pulse to finish
+                    vTaskDelay(ram_mirror.period_ms / portTICK_PERIOD_MS);
+
+                    // Toggle polarity of H bridge(s) for next time
+                    ram_mirror.line1_last_pol = !ram_mirror.line1_last_pol;
+                }
+                else
+                { // something is wrong, disable the bridge again
+                    LOG("Short circuit when driving line 1");
+                }
                 // disable bridges again
                 gpio_set_level(H_BRIDGE1_A, 0);
                 gpio_set_level(H_BRIDGE1_B, 0);
-
-                // Toggle polarity of H bridge(s) for next time
-                ram_mirror.line1_last_pol = !ram_mirror.line1_last_pol;
             }
 
             // Same as above, but "level out" the current draw a bit between the H bridges
@@ -265,12 +343,18 @@ void SLAVE_CLK_Task(void *parameter)
                 gpio_set_level(H_BRIDGE2_C, ram_mirror.line2_last_pol);
                 gpio_set_level(H_BRIDGE2_D, !ram_mirror.line2_last_pol);
 
-                vTaskDelay(ram_mirror.period_ms / portTICK_PERIOD_MS);
+                if (is_slave_voltage_ok())
+                {
+                    vTaskDelay(ram_mirror.period_ms / portTICK_PERIOD_MS);
+                    ram_mirror.line2_last_pol = !ram_mirror.line2_last_pol;
+                }
+                else
+                {
+                    LOG("Short circuit when driving line 2");
+                }
 
                 gpio_set_level(H_BRIDGE2_C, 0);
                 gpio_set_level(H_BRIDGE2_D, 0);
-
-                ram_mirror.line2_last_pol = !ram_mirror.line2_last_pol;
             }
             
             // do not increment when any slave is commissioned with pulses (keep master time as is)

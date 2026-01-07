@@ -45,6 +45,10 @@
 
 #define USE_TESTCODE 1
 
+// defines for detecting faults in the drive voltage
+#define MIN_SLAVE_VOLTAGE_MV        10000 // Absolute lower values do not make sense
+#define MAX_SLAVE_VOLTAGE_DEVIATION 0.75  // When multiplied with the initially measured drive voltage -> boundary
+                                          // at which slaves can still function. If below this limit -> fault
 
 //---------------------------------------------------------------------------
 // Enums
@@ -161,6 +165,8 @@ typedef struct
   int64_t drift_total_us;
   int64_t gps_last_connected_us;
   uint32_t operating_seconds; // seconds since last boot
+  bool short_circuit_line_1;
+  bool short_circuit_line_2;
 } ram_shared_t;
 
 //---------------------------------------------------------------------------

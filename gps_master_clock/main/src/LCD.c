@@ -19,7 +19,7 @@
 // '13:08:00 15.11.2025 DST: 0    ' = 26 chars + 4 spaces + 1 null
 #define MAX_TIME_PRINT_LEN              30
 
-#define DEBOUNCE_DURATION_MS            ( 30 / portTICK_PERIOD_MS )
+#define DEBOUNCE_DURATION_MS            ( 50 / portTICK_PERIOD_MS )
 // every press length between DEBOUNCE_DURATION_MS..LONG_PRESS_DURATION_MS is
 // considered a short press
 #define LONG_PRESS_DURATION_MS          ( 500 / portTICK_PERIOD_MS )
