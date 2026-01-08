@@ -19,7 +19,7 @@ static SemaphoreHandle_t tz_mutex;
 
 static adc_oneshot_unit_handle_t adc1_handle;
 static adc_cali_handle_t calib_handle;
-static uint32_t slave_relative_minimum_voltage;
+static int slave_rel_min_voltage_mV;
 
 static void print_stats(void)
 {
@@ -82,9 +82,9 @@ void give_tz_mutex(void)
     xSemaphoreGive(tz_mutex); 
 }
 
-static uint32_t calc_slave_voltage(void)
+static int calc_slave_voltage_mv(void)
 {
-    int raw = 0, voltage = 0, samples;
+    int raw = 0, voltage = 0, samples, result;
 
     for (samples = 0; samples < 4; ++samples)
     {
@@ -97,23 +97,24 @@ static uint32_t calc_slave_voltage(void)
 
     ESP_ERROR_CHECK(adc_cali_raw_to_voltage(calib_handle, raw, &voltage));
 
-    LOG("Samples: %d Reading: %d Voltage: %d", samples, raw, voltage);
+    // we have a 61k <-> 4.7k resistive divider
+    result = ((61000.0 + 4700.0) / 4700.0) * voltage;
+    LOG("Samples: %d Raw reading: %d ADC Voltage: %d Slave voltage: %d", samples, raw, voltage, result);
 
-    // we have a 56k <-> 4.7k resistive divider
-    return ((56000.0 + 4700.0) / 4700.0) * voltage;
+    return result;
 }
 
 static bool is_slave_voltage_ok(void)
 {
     bool result;
-    uint32_t slave_voltage = calc_slave_voltage();
+    int slave_voltage_mv = calc_slave_voltage_mv();
 
     // sanity check: Absolute value should not be too low (in case inital measurement is already
     // under fault measured)
-    if (slave_voltage < MIN_SLAVE_VOLTAGE_MV)
+    if (slave_voltage_mv < MIN_SLAVE_VOLTAGE_MV)
         result = false;
     // Voltage should not get too low, relative to the inital measurement
-    else if (slave_voltage < slave_relative_minimum_voltage * MAX_SLAVE_VOLTAGE_DEVIATION)
+    else if (slave_voltage_mv < slave_rel_min_voltage_mV * MAX_SLAVE_VOLTAGE_DEVIATION)
         result = false;
     else
         result = true;
@@ -146,7 +147,6 @@ void SLAVE_CLK_Task(void *parameter)
     gpio_set_level(H_BRIDGE2_C, 0);
     gpio_set_level(H_BRIDGE2_D, 0);
 
-
     // configure the one-shot ADC
     adc_oneshot_unit_init_cfg_t init_config1 = {
         .unit_id = ADC_UNIT_1,
@@ -170,9 +170,9 @@ void SLAVE_CLK_Task(void *parameter)
     // Determine what the inital driving voltage for the clock slaves is (assumes
     // there is no issue upon boot). Then calculate what the relative threshold is, below which
     // no operation is possible.
-    slave_relative_minimum_voltage = calc_slave_voltage() * MAX_SLAVE_VOLTAGE_DEVIATION;
+    slave_rel_min_voltage_mV = calc_slave_voltage_mv() * MAX_SLAVE_VOLTAGE_DEVIATION;
 
-    LOG("Initial slave voltage: %lumV", slave_relative_minimum_voltage);
+    LOG("Initial slave voltage: %dmV", slave_rel_min_voltage_mV);
 
     while(1)
     {
@@ -317,11 +317,18 @@ void SLAVE_CLK_Task(void *parameter)
             // set polarity of the h bridges
             if (line_1_en)
             {
-                // enable bridge, let current flow
-                gpio_set_level(H_BRIDGE1_A, ram_mirror.line1_last_pol);
-                gpio_set_level(H_BRIDGE1_B, !ram_mirror.line1_last_pol);
+                // In case many pulses have to be generated and a short circuit is present:
+                // Do not short out the line over and over. Either wait until the error is gone
+                // or we are back to regular, minute triggered pulses.
+                if (clock_minutes_diff == 1 || !ram_shared.short_circuit_line_1)
+                {
+                    // enable bridge, let current flow
+                    gpio_set_level(H_BRIDGE1_A, ram_mirror.line1_last_pol);
+                    gpio_set_level(H_BRIDGE1_B, !ram_mirror.line1_last_pol);
 
-                ram_shared.short_circuit_line_1 = !is_slave_voltage_ok();
+                    ram_shared.short_circuit_line_1 = !is_slave_voltage_ok();
+                }
+
                 if (ram_shared.short_circuit_line_1)
                 { // something is wrong, disable the bridge again
                     LOG("Short circuit when driving line 1");
@@ -341,10 +348,14 @@ void SLAVE_CLK_Task(void *parameter)
             // Same as above, but "level out" the current draw a bit between the H bridges
             if (line_2_en)
             {
-                gpio_set_level(H_BRIDGE2_C, ram_mirror.line2_last_pol);
-                gpio_set_level(H_BRIDGE2_D, !ram_mirror.line2_last_pol);
+                if (clock_minutes_diff == 1 || !ram_shared.short_circuit_line_2)
+                {
+                    gpio_set_level(H_BRIDGE2_C, ram_mirror.line2_last_pol);
+                    gpio_set_level(H_BRIDGE2_D, !ram_mirror.line2_last_pol);
 
-                ram_shared.short_circuit_line_2 = !is_slave_voltage_ok();
+                    ram_shared.short_circuit_line_2 = !is_slave_voltage_ok();
+                }
+
                 if (ram_shared.short_circuit_line_2)
                 {
                     LOG("Short circuit when driving line 2");

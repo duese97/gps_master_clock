@@ -73,6 +73,7 @@
 // testing utility
 #define MAX_COMMAND_LENGTH  16
 
+
 enum
 {
     TESTCODE_SW_LOCKUP = 0,
@@ -532,7 +533,7 @@ static void await_and_handle_testcodes(void)
         "\t\t'TEST:1\\t' -> simulate time jumping by +1 hour\n"
         "\t\t'TEST:2\\t' -> simulate time jumping by -1 hour\n"
     );
-    
+
     while(1)
     {
         // wait for incoming data

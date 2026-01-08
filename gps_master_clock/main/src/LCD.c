@@ -153,6 +153,29 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
     LCD_I2C_print(scratch_buff);
 
     LCD_I2C_setCursor(0, 1);
+
+    // Check first if there is an error condition
+    char* line_err_str = NULL;
+    if (ram_shared.short_circuit_line_1 && ram_shared.short_circuit_line_2)
+    {
+        line_err_str = "I&II";
+    }
+    else if (ram_shared.short_circuit_line_1)
+    {
+        line_err_str = "I   ";
+    }
+    else if (ram_shared.short_circuit_line_2)
+    {
+        line_err_str = "II  ";
+    }
+
+    // Show/prioritize error codes as long they are present
+    if (line_err_str)
+    {
+        LCD_I2C_printf("SHORTED L. %s!", line_err_str);
+        return;
+    }
+
     switch(status_screen_idx)
     {
         case STATUS_GPS_LOCK:
@@ -220,12 +243,12 @@ static void LCD_print_default_displays(char* time_print_buff, int status_screen_
         {
             if (ram_shared.drift_total_us == INT64_MAX)
             {
-                LCD_I2C_printf(SUM_ICO_STR" drift  ?????ms");
+                LCD_I2C_printf("Drift    ?????ms");
             }
             else
             {
                 int msec = USEC_TO_MS(ram_shared.drift_total_us);
-                LCD_I2C_printf(SUM_ICO_STR" drift  %+5dms", msec);
+                LCD_I2C_printf("Drift    %+5dms", msec);
             }
             break;
         }
